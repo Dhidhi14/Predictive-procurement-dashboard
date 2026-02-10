@@ -1,0 +1,30 @@
+## Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+## Virtual environments
+.venv/
+venv/
+ENV/
+
+## Streamlit
+.streamlit/secrets.toml
+
+## Jupyter
+.ipynb_checkpoints/
+
+## OS / editor
+.DS_Store
+.vscode/
+
+## Data / outputs (adjust if you want tracked)
+*.parquet
+*.csv
+*.xlsx
+*.db
+*.sqlite
+*.log
+outputs/
+data/
+
