@@ -1,81 +1,106 @@
 """
-ETL pipeline placeholder for the Predictive Procurement Analytics project.
+ETL pipeline for the Predictive Procurement Analytics project.
 
-In your full project, this module should:
-1. Ingest raw data from the university SIS/ERP and bookstore systems.
-2. Clean and normalize datasets (students, sections, adoptions, enrollment transactions).
-3. Join them into a fact table at the grain: one row per student per section.
-4. Persist the resulting tables into the schema defined in `schema.sql`.
-
-For the dashboard demo, we expose a simple `load_feature_table` function that you
-can later replace with your real ETL / feature-store read logic.
+This module ingests real augmented data from the university SIS/ERP,
+cleans/normalizes the datasets, and prepares feature tables for the ML models
+and dashboard.
 """
 
 from __future__ import annotations
 
-from typing import Optional
-
-import numpy as np
+import glob
+import os
 import pandas as pd
+import numpy as np
 
-
-def load_feature_table(seed: int = 42, n_rows: int = 2000) -> pd.DataFrame:
+def load_feature_table(data_dir: str = "new/Augmented", sample_frac: float = 0.05, seed: int = 42) -> pd.DataFrame:
     """
-    Generate a synthetic feature table that mimics the structure of the
-    real predictive procurement dataset.
-
-    Replace this with a real database query or file read in production.
+    Load and map the augmented real dataset to the dashboard schema.
+    Since the dataset is very large, sample_frac allows loading a subset to keep the dashboard responsive.
     """
-
+    file_pattern = os.path.join(data_dir, "*_balanced_dataset.csv")
+    csv_files = glob.glob(file_pattern)
+    
+    if not csv_files:
+        raise FileNotFoundError(f"No CSV files found matching {file_pattern}")
+        
+    dfs = []
+    # Use a fixed random generator
     rng = np.random.default_rng(seed)
-
-    terms = ["Fall 2025", "Spring 2026", "Fall 2026"]
-    departments = ["CSE", "HUM", "ART", "MUS", "ENG", "BIO", "BUS"]
-    publishers = ["Pearson", "McGraw-Hill", "Cengage", "Wiley"]
-    student_types = ["Full-Time", "Part-Time"]
-    formats = ["Physical", "Digital"]
-
-    df = pd.DataFrame(
-        {
-            "Term": rng.choice(terms, size=n_rows),
-            "Dept_Code": rng.choice(departments, size=n_rows),
-            "Publisher": rng.choice(publishers, size=n_rows),
-            "Student_Type": rng.choice(student_types, size=n_rows),
-            "Format": rng.choice(formats, size=n_rows, p=[0.7, 0.3]),
-        }
-    )
-
-    # Economic features
-    df["Rental_to_Retail_Ratio"] = rng.uniform(0.4, 1.1, size=n_rows)
-    df["Wallet_Pressure_Score"] = rng.uniform(0, 1, size=n_rows)
-
-    # Behavioral / logistical features
-    df["Digital_Lock_Flag"] = rng.integers(0, 2, size=n_rows)
-    df["Major_Alignment_Score"] = rng.uniform(0, 1, size=n_rows)
-    df["Commuter_Friction"] = rng.uniform(0, 1, size=n_rows)
-
-    # Arbitrage Index: lower ratio => more arbitrage opportunity
-    df["Arbitrage_Index"] = 1 - df["Rental_to_Retail_Ratio"]
-
-    # Construct an opt-out probability that depends on the features
-    base = 0.25 + 0.4 * df["Arbitrage_Index"] + 0.3 * df["Wallet_Pressure_Score"]
-    base -= 0.35 * df["Digital_Lock_Flag"]  # digital lock => more likely to opt-in
-    base -= 0.15 * df["Major_Alignment_Score"]
-    base = base.clip(0.01, 0.95)
-    df["Opt_Out_Probability"] = base
-
-    # Convert to a predicted purchase probability
-    df["Predicted_Purchase_Prob"] = 1 - df["Opt_Out_Probability"]
-
-    # Demand and spend aggregates at row level (can be aggregated in the dashboard)
-    df["Predicted_Demand_Units"] = rng.integers(1, 4, size=n_rows)
-    df["Unit_Price"] = rng.uniform(40, 180, size=n_rows)
-    df["Projected_Spend"] = df["Predicted_Demand_Units"] * df["Unit_Price"] * df[
-        "Predicted_Purchase_Prob"
-    ]
-
-    return df
-
+    
+    for f in csv_files:
+        try:
+            # We sample a fraction to keep memory footprint low
+            df = pd.read_csv(f, engine='c')
+            if sample_frac < 1.0:
+                df = df.sample(frac=sample_frac, random_state=seed)
+            dfs.append(df)
+        except Exception as e:
+            print(f"Error reading {f}: {e}")
+            
+    if not dfs:
+        return pd.DataFrame()
+        
+    df = pd.concat(dfs, ignore_index=True)
+    
+    # Map physical columns to what the dashboard and model expect
+    mapped_df = pd.DataFrame()
+    
+    mapped_df["Term"] = df["term_code"].fillna("Unknown") + " " + df["term_year"].astype(str)
+    
+    # Extract dept from section_id if possible (e.g. BN-8304-1-126-A-... -> 126 is dept?)
+    def extract_dept(sec):
+        parts = str(sec).split("-")
+        return parts[3] if len(parts) > 3 else "GEN"
+    mapped_df["Dept_Code"] = df["section_id"].apply(extract_dept)
+    
+    mapped_df["Publisher"] = df["author"].fillna("Unknown Author").astype(str).str.slice(0, 20)
+    
+    student_type_map = {"F": "Full-Time", "P": "Part-Time", "H": "Half-Time", "L": "Unknown"}
+    mapped_df["Student_Type"] = df["student_full_part_time_status"].map(student_type_map).fillna("Full-Time")
+    
+    mapped_df["Format"] = df["ebook_ind"].apply(lambda x: "Digital" if x == 1.0 else "Physical")
+    
+    # Pricing & Economic Features
+    retail_new = pd.to_numeric(df["retail_new"], errors='coerce').fillna(100.0)
+    retail_rent = pd.to_numeric(df["retail_new_rent"], errors='coerce').fillna(50.0)
+    
+    retail_new_safe = retail_new.replace(0.0, 100.0)
+    ratio = retail_rent / retail_new_safe
+    mapped_df["Rental_to_Retail_Ratio"] = ratio.clip(0.0, 1.5)
+    
+    # Avoid zero division Arbitrage_Index
+    mapped_df["Arbitrage_Index"] = 1.0 - mapped_df["Rental_to_Retail_Ratio"]
+    
+    # Wallet pressure
+    afford_score = pd.to_numeric(df["price_affordability_score"], errors='coerce').fillna(300.0)
+    max_score = afford_score.max() if afford_score.max() > 0 else 1.0
+    mapped_df["Wallet_Pressure_Score"] = (afford_score / max_score).clip(0.0, 1.0)
+    
+    mapped_df["Digital_Lock_Flag"] = df["ebook_ind"].fillna(0.0)
+    
+    # Synthetic proxies
+    mapped_df["Major_Alignment_Score"] = rng.uniform(0.5, 1.0, size=len(mapped_df))
+    mapped_df["Commuter_Friction"] = rng.uniform(0.1, 0.9, size=len(mapped_df))
+    
+    # Labels
+    will_buy = pd.to_numeric(df["will_buy"], errors='coerce').fillna(1)
+    mapped_df["Actual_Purchase_Flag"] = will_buy
+    mapped_df["Opt_Out_Probability"] = 1.0 - will_buy
+    
+    mapped_df["Predicted_Demand_Units"] = 1
+    mapped_df["Unit_Price"] = retail_new.clip(0.01) # Avoid zero price entirely
+    
+    # By default set pred to actual, ML model replaces this
+    mapped_df["Predicted_Purchase_Prob"] = will_buy
+    mapped_df["Projected_Spend"] = mapped_df["Predicted_Demand_Units"] * mapped_df["Unit_Price"] * mapped_df["Predicted_Purchase_Prob"]
+    
+    # Raw features for ML
+    mapped_df["family_annual_income"] = pd.to_numeric(df["family_annual_income"], errors='coerce').fillna(40000)
+    mapped_df["has_scholarship"] = pd.to_numeric(df["has_scholarship"], errors='coerce').fillna(0)
+    mapped_df["has_loan"] = pd.to_numeric(df["has_loan"], errors='coerce').fillna(0)
+    mapped_df["is_rental"] = pd.to_numeric(df["is_rental"], errors='coerce').fillna(0)
+    
+    return mapped_df
 
 __all__ = ["load_feature_table"]
-

@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from etl_pipeline import load_feature_table
-from feature_engine import compute_feature_importance_example
+from feature_engine import train_and_predict
 
 
 st.set_page_config(
@@ -98,8 +98,10 @@ st.markdown(
 
 
 @st.cache_data(show_spinner=False)
-def get_data() -> pd.DataFrame:
-    return load_feature_table()
+def get_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    df = load_feature_table(sample_frac=0.03)
+    df, fi = train_and_predict(df)
+    return df, fi
 
 
 def kpi_card(label: str, value: str, help_text: str | None = None, key: str | None = None):
@@ -247,9 +249,8 @@ def render_price_sensitivity(df: pd.DataFrame):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_feature_importance():
+def render_feature_importance(fi: pd.DataFrame):
     st.markdown("#### Feature Importance (Model Explainability)")
-    fi = compute_feature_importance_example()
 
     fig = px.bar(
         fi.sort_values("Importance"),
@@ -428,7 +429,7 @@ def render_recommendations(df: pd.DataFrame):
 
 
 def main():
-    df = get_data()
+    df, fi_df = get_data()
 
     render_header()
     st.markdown("---")
@@ -454,7 +455,7 @@ def main():
             st.markdown('</div>', unsafe_allow_html=True)
         with upper_mid:
             st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
-            render_feature_importance()
+            render_feature_importance(fi_df)
             st.markdown('</div>', unsafe_allow_html=True)
         with upper_right:
             st.markdown('<div class="glass-panel">', unsafe_allow_html=True)

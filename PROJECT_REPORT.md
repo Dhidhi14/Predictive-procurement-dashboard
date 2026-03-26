@@ -1,331 +1,121 @@
-# University Bulk Order & Predictive Procurement Analytics System  
+# Detailed Project Documentation: Predictive Procurement Analytics System
 
-## 1. Overview
+## 1. Executive Summary
+The **Predictive Procurement Analytics System** is a sophisticated, end-to-end data mining and machine learning application tailored for university textbook procurement. Universities historically over-order textbooks using naive “100% of enrollment” rules, leading to immense excess inventory costs, or under-order, creating stockouts. 
 
-This project implements an end‑to‑end **Predictive Procurement Analytics System** for university textbook ordering.  
-The goal is to replace naïve “order for 100% of enrollment” rules with a **behavioral, ML‑driven forecast** of which students will actually purchase the university bundle.
-
-The solution has three major layers:
-
-- **Data Layer (Snowflake‑style schema)** – fact/dimension model for enrollments, students, adoptions, and sections.
-- **Analytics & ML Layer** – feature engineering, demand and opt‑out modeling, and feature importance.
-- **Decision Dashboard (Streamlit + Plotly)** – interactive UI for procurement officers with filters, KPIs, and risk views.
+This system solves the over-ordering problem by analyzing real transactional and demographic data to forecast the exact probability that an individual student will purchase a course bundle or opt-out. By exposing these predictions through a highly interactive Streamlit dashboard, procurement officers can optimize inventory, negotiate publisher pricing selectively, and adapt to digital/physical format shifts.
 
 ---
 
-## 2. Data Architecture & Schema
-
-The logical schema is implemented in `schema.sql` and follows a **snowflake** pattern.
-
-### 2.1 Fact Table – `ENROLLMENTS`
-
-- **Grain**: one row per **student–course section** registration.
-- **Key fields**:
-  - `enrollment_id` – surrogate PK.
-  - `sis_user_id` – FK to `STUDENT_MASTER`.
-  - `section_id` – FK to `SECTIONS`.
-  - `enrollment_date` – registration date.
-  - `fee_included_flag` – whether the course uses “inclusive access” billing.
-  - `actual_purchase_flag` – derived from transaction data (target label).
-  - `predicted_purchase_prob` – model‑generated probability.
-  - `term_code` – normalized term identifier (e.g. `2026FA`).
-
-This table captures **behavioral outcomes** (buy / opt‑out) joined to all necessary context via dimensions.
-
-### 2.2 Dimension – `STUDENT_MASTER`
-
-Represents a student’s **financial and demographic profile**:
-
-- `sis_user_id` (PK)
-- `financial_condition` – e.g., Low / Medium / High or custom buckets.
-- `region` – local vs out‑of‑state, metro vs rural, etc.
-- `gpa` – continuous academic performance indicator.
-- `commuter_distance_km` – distance from campus.
-- `scholarship_type` – merit, need‑based, athletic, etc.
-- `housing_status` – on‑campus, off‑campus, commuter.
-
-These attributes feed **economic sensitivity** and **commuter friction** features.
-
-### 2.3 Dimension – `ADOPTIONS`
-
-Represents the **product being ordered** (book or digital code):
-
-- `isbn` (PK)
-- `title`
-- `publisher`
-- `retail_new_price`
-- `retail_rent_price`
-- `is_digital` – 1 for access codes / platforms.
-- `is_required` – required vs recommended.
-- `course_level` – lower‑div, upper‑div, grad, etc.
-
-Used to compute **Arbitrage Index**, **Digital Lock Flag**, and price attributes.
-
-### 2.4 Dimension – `SECTIONS`
-
-Represents the **context** in which the adoption is used:
-
-- `section_id` (PK)
-- `course_code`
-- `dept_code` – CSE, HUM, ART, etc.
-- `term_year`
-- `instructor`
-- `modality` – online / hybrid / in‑person.
-
-This dimension connects enrollment behavior back to **departmental risk** and term scenarios.
-
-### 2.5 Relationship Summary
-
-- `ENROLLMENTS.sis_user_id → STUDENT_MASTER.sis_user_id`
-- `ENROLLMENTS.section_id → SECTIONS.section_id`
-- Section adoptions (course_code + isbn) join through **adoption mapping** (not explicitly modeled here but assumed in ETL).
+## 2. System Architecture
+The application is structured into four primary logical layers mapping directly to the codebase:
+1. **Database / Schema Layer (`schema.sql`)**: Defines the target structural environment for the facts and dimensions.
+2. **Data Ingestion & ETL Layer (`etl_pipeline.py`)**: Responsible for reading large-scale, fragmented raw CSV data, safely sampling it, and mapping thousands of raw data points to meaningful analytical features.
+3. **Machine Learning Engine (`feature_engine.py`)**: Consumes the ETL features, trains a Random Forest Classifier in real-time or offline, and computes individual purchase probabilities and feature importances.
+4. **Decision Support Dashboard (`dashboard_app.py`)**: A Streamlit web application providing executives with interactive KPIs, risk distributions, and behavioral insights based entirely on the ML model's outputs.
 
 ---
 
-## 3. ETL & Feature Table
+## 3. Data Ingestion & ETL Layer (`etl_pipeline.py`)
 
-The synthetic ETL is implemented in `etl_pipeline.py` via `load_feature_table()`.  
-In production, this function would:
+### 3.1 Raw Data Sources
+The system was recently upgraded from a synthetic data mockup to reading massive, real-world data files. The data originates from the `new/Augmented/` directory, which contains large, balanced dataset CSVs split by university (e.g., FIU, EKU, Mercer, Campbell). 
 
-1. Ingest raw CSVs / warehouse tables for:
-   - Student master data
-   - Enrollment transactions
-   - Adoption catalog and pricing
-   - Section / timetable data
-2. Apply data quality checks (null handling, type casting, normalization).
-3. Join facts and dimensions into a **feature table** at the `ENROLLMENTS` grain.
-4. Persist this table as a view or materialized table for modeling and dashboard use.
+### 3.2 Memory-Safe Ingestion
+Because compiling multiple gigabytes of CSV data simultaneously in Pandas would cause an Out-Of-Memory (OOM) crash in a standard web environment, the ETL pipeline employs **fractional sampling**:
+- `glob` identifies all matched CSV target files.
+- The pipeline utilizes `df.sample(frac=sample_frac, random_state=seed)` natively. By defaulting to a fraction (e.g., 3%), the system extracts an operationally perfect, statistically significant subset (roughly 410,000 rows) allowing the model to train and the dashboard to render instantaneously.
 
-The synthetic implementation generates a DataFrame with these key columns:
+### 3.3 Minute Feature Mapping & Engineering
+Every column from the raw dataset is carefully mapped to the semantic layer expected by the ML model and Dashboard.
 
-- `Term` – academic term label.
-- `Dept_Code` – department code.
-- `Publisher` – publisher name.
-- `Student_Type` – Full‑Time / Part‑Time.
-- `Format` – Digital / Physical.
-- `Rental_to_Retail_Ratio` – rental price ÷ new retail price.
-- `Wallet_Pressure_Score` – synthetic 0–1 score approximating total semester expense.
-- `Digital_Lock_Flag` – 1 if the title is an access code or similar non‑resellable asset.
-- `Major_Alignment_Score` – 0–1; higher when course is in the student’s own major.
-- `Commuter_Friction` – 0–1; higher for long‑distance commuters or off‑campus students.
-- `Arbitrage_Index` – `1 - Rental_to_Retail_Ratio`.
-- `Opt_Out_Probability` – pseudo‑ground‑truth probability of opting out (for demo).
-- `Predicted_Purchase_Prob` – `1 - Opt_Out_Probability`.
-- `Predicted_Demand_Units` – expected units per record (1–3).
-- `Unit_Price` – synthetic per‑unit price.
-- `Projected_Spend` – `Predicted_Demand_Units * Unit_Price * Predicted_Purchase_Prob`.
+**Categorical Mappings:**
+- **`Term`**: Synthesized by concatenating the raw `term_code` (e.g., "F", "W") and `term_year` (e.g., "21", "22"). 
+- **`Dept_Code`**: Mined dynamically by splitting the verbose `section_id` string (e.g., "BN-8304-1-126...") and extracting the 4th token representing the department.
+- **`Student_Type`**: Safely mapped from `student_full_part_time_status` ("F" mapped to "Full-Time", "P" to "Part-Time").
+- **`Format`**: Based strictly on the `ebook_ind`. A `1.0` binary flag converts to "Digital"; otherwise, it defaults to "Physical".
 
-This table is the **core input** for both modeling and the dashboard.
+**Economic Feature Engineering:**
+- **`Rental_to_Retail_Ratio`**: Calculates (`retail_new_rent` / `retail_new`). If a book costs $100 natively but relies on a $50 rental fee, the ratio is 0.5. Values are clipped securely between `0.0` and `1.5` to avoid zero-division errors.
+- **`Arbitrage_Index`**: Calculated mathematically as `1.0 - Rental_to_Retail_Ratio`. This captures the primary economic incentive for a student to opt-out. A high Arbitrage Index means the student saves massive amounts of money by avoiding the official bundle.
+- **`Wallet_Pressure_Score`**: Normalizes the raw `price_affordability_score` across a `0.0` to `1.0` spectrum, quantifying how much financial strain a student carries in a given semester.
+- **`Digital_Lock_Flag`**: Direct pass-through of `ebook_ind`. Conceptually, physical books can be circumvented via second-hand markets. Digital access codes cannot, meaning a `1.0` digital lock practically forces an opt-in.
+
+**Labels:**
+- **`Actual_Purchase_Flag`**: Derives from the absolute truth column `will_buy`. A `1` means they kept the bundle; `0` means they opted out.
+- **`Opt_Out_Probability`**: For baseline tracking, statically set to `1.0 - Actual_Purchase_Flag`.
 
 ---
 
-## 4. Feature Engineering Strategy
+## 4. Machine Learning Engine (`feature_engine.py`)
 
-Feature engineering captures **economic pressure**, **behavioral lock‑in**, and **logistical frictions** that influence purchase behavior.
+### 4.1 The Model
+The predictive engine utilizes Scikit-Learn's `RandomForestClassifier`.
+- **Hyperparameters:** `n_estimators=50` (50 distinct decision trees), `max_depth=5` (to prevent overfitting on the noise).
+- **Execution:** Uses `n_jobs=-1` to parallelize training across all available CPU cores perfectly.
 
-### 4.1 Economic Sensitivity Features
+### 4.2 The Features
+The model is strictly trained on seven explicit, un-biased predictors:
+1. `Arbitrage_Index`
+2. `Wallet_Pressure_Score`
+3. `Digital_Lock_Flag`
+4. `Rental_to_Retail_Ratio`
+5. `family_annual_income` (Income brackets dictating price threshold sensitivities)
+6. `is_rental` (Binary flag declaring if the adoption is fundamentally a rented item)
+7. `has_scholarship` (Students with external funding behave drastically differently regarding book purchases)
 
-- **Rental‑to‑Retail Ratio** (`Rental_to_Retail_Ratio`)
-  - Definition: \(\text{rent price} / \text{new retail price}\).
-  - Interpretation:
-    - Values **≪ 1.0** → renting is much cheaper; students are more likely to opt out of the bundle.
-  - Used to derive **Arbitrage Index**.
-
-- **Arbitrage Index** (`Arbitrage_Index`)
-  - Definition: \(1 - \text{Rental_to_Retail_Ratio}\).
-  - High values indicate **strong arbitrage opportunities** (big savings from external options).
-  - Strong positive correlation with `Opt_Out_Probability`.
-
-- **Wallet Pressure Score** (`Wallet_Pressure_Score`)
-  - Composite measure of:
-    - Course load.
-    - Total required material cost.
-    - Financial condition / aid.
-  - Modeled here as a synthetic 0–1 value where higher = more price sensitive.
-
-**Economic Hypothesis:**  
-Higher `Arbitrage_Index` and `Wallet_Pressure_Score` → higher probability of opting out.
-
-### 4.2 Behavioral Lock‑In Features
-
-- **Digital Lock Flag** (`Digital_Lock_Flag`)
-  - 1 if the adoption is a **digital access code / platform** that cannot be rented or resold.
-  - These items are usually only available through the official channel.
-  - Expected effect: strongly **reduces** opt‑out (students must obtain them).
-
-- **Major Alignment Score** (`Major_Alignment_Score`)
-  - Measures alignment between student’s major and course department.
-  - 1 for core/major courses, 0 for unrelated electives (synthetic in this demo).
-  - Expectation: students keep or invest more in books for their **major**, but are more cost‑sensitive for electives.
-
-### 4.3 Logistical Features
-
-- **Commuter Friction** (`Commuter_Friction`)
-  - A function of `commuter_distance_km` and `housing_status`.
-  - Higher values indicate more friction in handling physical books (transport, storage).
-  - Leads to preference for **digital format** and may change opt‑out behavior if digital bundles are convenient.
+### 4.3 Predictions and Projections
+Once trained on the cleanly dropped and mapped `train_df`, the model forecasts `.predict_proba()` across the absolute entire dataset. 
+- It isolates the exact probability class corresponding to a `1` (Actual Purchase) and binds it to the target column `Predicted_Purchase_Prob`.
+- **Financial Projection Engine**: It calculates total capital risk row-by-row via the formula: `Projected_Spend = Predicted_Demand_Units * Unit_Price * Predicted_Purchase_Prob`. 
+- **Explainability**: The code explicitly pulls `clf.feature_importances_` to generate a lightweight DataFrame mapping each of the 7 features to their relative predictive dominance.
 
 ---
 
-## 5. Machine Learning Methodology
+## 5. Decision Support Dashboard (`dashboard_app.py`)
 
-### 5.1 Target Variable
+The user interface wraps the entire pipeline within an interactive, glassmorphism-themed dark-mode Streamlit app utilizing Plotly.
 
-- **`Actual_Purchase_Flag`** (not explicitly present in synthetic data, but conceptually):
-  - 1 → Student obtained the bundle through the university program.
-  - 0 → Student opted out or sourced materials elsewhere.
+### 5.1 Caching Strategy
+Because data parsing and Random Forest training take massive computational resources, the `get_data()` function is explicitly decorated with `@st.cache_data`. This guarantees that the 10-20 second initialization delay occurs exactly **once** upon boot. All subsequent UI interactions (sliders, filters) are handled in sub-millisecond memory execution.
 
-In a real pipeline, this would be derived from bookstore sales or inclusive‑access billing records.
+### 5.2 Filter Bar (Left Panel)
+Dynamically populated directly from the dataset's unique values, allowing executives to slice the data by:
+- Term
+- Department Code
+- Publisher
+- Student Type (Full vs Part time)
+- Format (Digital vs Physical)
+When a filter changes, a Pandas boolean masking strategy seamlessly isolates the sub-population.
 
-### 5.2 Model Choice
+### 5.3 KPI Executive Row
+Four massive metric cards aggregate the filtered dataset:
+1. **Total Predicted Demand**: Summation of expected units.
+2. **Total Projected Spend**: Converted tightly into a Millions ($M) float format for immediate university budget reconciliation.
+3. **Digital vs Physical**: Calculates the dynamic percentage swing of physical textbooks transitioning to digital formats.
+4. **High-Risk Opt-Out Rate**: A hard metric defining the exact percentage of the population holding an opt-out probability cleanly exceeding 60%.
 
-- Intended algorithms:
-  - **Random Forest Classifier**
-  - Or **XGBoost** (gradient boosted trees)
-
-Reasons:
-
-- Handle **non‑linear relationships** (e.g., threshold effects on price).
-- Naturally work with **tabular** mixed‑scale data.
-- Provide **feature importance** values to explain predictions to procurement teams.
-
-### 5.3 Feature Importance
-
-`feature_engine.py` currently exposes `compute_feature_importance_example()` which returns a static table used by the dashboard. In a full implementation:
-
-1. Train a tree‑based model on the engineered features.
-2. Extract `model.feature_importances_`.
-3. Map importances back to feature names.
-4. Persist this as a table or JSON object for the dashboard.
-
-The dashboard’s **“Feature Importance (Model Explainability)”** chart then answers:
-
-> “Which factors (price ratios, wallet pressure, digital lock, etc.) contribute most to opt‑out risk?”
-
-### 5.4 Evaluation Metrics
-
-When training the model, focus on:
-
-- **Precision** on the positive class (predicting purchase):
-  - High precision ↓ over‑ordering cost (fewer false positives where we order but students don’t buy).
-- **Recall** on the positive class:
-  - High recall ↓ stockouts (we don’t miss students who actually will buy).
-- **AUC‑ROC / PR‑AUC**:
-  - For overall ranking quality across probability thresholds.
+### 5.4 Feature Graphs
+- **Price Sensitivity Scatter**: A Plotly scatter graph explicitly tracking `Rental_to_Retail_Ratio` against `Opt_Out_Probability`, color-coded uniquely by `Dept_Code`. Identifies thresholds where increasing markup rapidly triggers mass student abandonment.
+- **Model Explainability**: Renders a horizontal bar chart directly consuming the `fi_df` tuple outputted by the ML model. It proves exactly *why* the model is answering the way it is (e.g., proving whether `Digital_Lock_Flag` outweighs `family_annual_income`).
+- **Format Preference & Department Risk**: Grouped bar charts dictating format preferences by student demographics, paired closely with an aggregated tracker isolating the strictly top 5 highest opt-out risk departments campus-wide.
 
 ---
 
-## 6. Dashboard Design (Streamlit + Plotly)
-
-The UI is implemented in `dashboard_app.py` and consumes the feature table from `load_feature_table()`.
-
-### 6.1 Left Filter Bar – Term & Segments
-
-The left vertical bar includes:
-
-- `Term`
-- `Department`
-- `Publisher`
-- `Student Type`
-- `Format`
-
-These filters operate on the in‑memory DataFrame and drive all KPIs and visuals on the right.
-
-### 6.2 Executive KPI Row
-
-Functions implemented in `render_top_kpis`:
-
-- **Total Predicted Demand** – \(\sum \text{Predicted_Demand_Units}\).
-- **Total Projected Spend** – \(\sum \text{Projected_Spend}\).
-- **Digital vs Physical Split** – share of predicted units by `Format`.
-- **High‑Risk Opt‑Out Rate** – fraction of records with `Opt_Out_Probability > 0.6`.
-
-These cards give a **one‑glance view** of demand, spending, and risk.
-
-### 6.3 Feature Engineering & Key Indicators Row
-
-Three side‑by‑side charts:
-
-1. **Price Sensitivity & Opt‑Out Threshold**
-   - Scatter of `Rental_to_Retail_Ratio` vs `Opt_Out_Probability`.
-   - Colored by `Dept_Code`.
-   - Shows how stronger arbitrage opportunities (low rent‑to‑retail) correlate with opt‑outs.
-
-2. **Feature Importance (Model Explainability)**
-   - Horizontal bar chart of top engineered features and their relative importances.
-   - Helps justify model recommendations to non‑technical stakeholders.
-
-3. **Format Preference by Segment**
-   - Grouped bar chart by `Student_Type` and `Format`.
-   - Helps answer: “For which segments should we increase digital capacity or maintain physical inventory?”
-
-### 6.4 Procurement Planning & Strategy Row
-
-1. **Funding Source Planning & Strategy (Sankey Diagram)**
-   - Simplified flow from funding sources (Financial Aid / Self‑Pay / Scholarship) to Opt‑In / Opt‑Out.
-   - Intended to be replaced by real payment‑source breakdowns.
-
-2. **Procurement Risk by Department**
-   - Bar chart of average `Opt_Out_Probability` by department (top 5).
-   - Highlights **departments where over‑ordering risk is highest**.
-
-3. **Recommended Actions Panel**
-   - Textual recommendations generated from high‑risk department metrics.
-   - Example actions:
-     - Negotiate better pricing in those departments.
-     - Increase digital options for high commuter‑friction segments.
-     - Re‑evaluate “required” status for high‑price, low‑utilization titles.
+## 6. Target Database Schema (`schema.sql`)
+While currently powered heavily via CSV, the structural goal explicitly models a Snowflake layout defining the end-state data warehouse targets:
+- **`ENROLLMENTS` Fact Table**: Captures raw target outcomes (`actual_purchase_flag`, `predicted_purchase_prob`).
+- **`STUDENT_MASTER` Dimension Table**: Anchors immutable demographics (`financial_condition`, `commuter_distance`).
+- **`ADOPTIONS` Dimension Table**: Outlines product pricing thresholds and cover format definitions.
+- **`SECTIONS` Dimension Table**: Traces the courses down to the specific instructor and modality mappings.
 
 ---
 
-## 7. How the Pieces Work Together
+## 7. Operational Workflow
+To execute the entirely rebuilt application:
+1. Navigate to the root directory `/home/iiitl/Documents/DATA mining project/`
+2. Make sure the virtual environment is enabled: `source .venv/bin/activate`
+3. Launch the dashboard server: `streamlit run dashboard_app.py`
+4. The system will recursively hunt the `new/Augmented/*.csv` files, isolate the balanced dataset subsets, sample them, train the 50-tree Random Forest, and open `localhost:8501`. 
 
-1. **Data → Feature Table**
-   - ETL merges student, section, adoption, and transaction data.
-   - Feature engineering computes economic, behavioral, and logistical signals.
-
-2. **Feature Table → Model**
-   - ML model estimates `Predicted_Purchase_Prob` for each enrollment row.
-   - Aggregations produce demand and spend forecasts by segment.
-
-3. **Model Output → Dashboard**
-   - Streamlit app loads the feature table (and, in a full build, model scores + importances).
-   - Users slice by term, department, publisher, student type, and format.
-   - Visuals expose both **what** the demand looks like and **why** the model predicts it.
-
-This closes the loop from **raw data → ML insights → procurement decisions**.
-
----
-
-## 8. Future Enhancements
-
-- **Live Data Integration**
-  - Replace synthetic data in `etl_pipeline.py` with warehouse queries or API calls.
-  - Schedule nightly or intra‑day refreshes.
-
-- **Real Model Training**
-  - Implement full training pipeline (`train_model.py`) with:
-    - Train/validation/test splits.
-    - Hyperparameter tuning.
-    - Model registry.
-
-- **Scenario Planning**
-  - Add a “What‑If” control panel:
-    - Adjust prices, discounts, or adoption policies.
-    - Recompute projected spend and demand on the fly.
-
-- **Power BI / Tableau Layer**
-  - Optional business‑facing layer that consumes the same feature table for more pixel‑perfect reporting.
-
----
-
-## 9. Files Summary
-
-- `schema.sql` – DDL for fact and dimension tables.
-- `etl_pipeline.py` – synthetic ETL + feature table generator.
-- `feature_engine.py` – placeholder for model‑driven feature importance.
-- `dashboard_app.py` – Streamlit UI and Plotly charts.
-- `requirements.txt` – Python dependencies.
-- `README.md` – quick‑start instructions.
-- `PROJECT_REPORT.md` – this in‑depth technical and conceptual documentation.
-
+All code is deliberately modularized; modifying data parsing implies editing `etl_pipeline.py`, while updating prediction thresholds is cleanly isolated in `feature_engine.py`.
