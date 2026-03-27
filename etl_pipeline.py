@@ -54,6 +54,7 @@ def load_feature_table(data_dir: str = "new/Augmented", sample_frac: float = 0.0
         return parts[3] if len(parts) > 3 else "GEN"
     mapped_df["Dept_Code"] = df["section_id"].apply(extract_dept)
     
+    mapped_df["Title"] = df["title"].fillna("Unknown Title").astype(str)
     mapped_df["Publisher"] = df["author"].fillna("Unknown Author").astype(str).str.slice(0, 20)
     
     student_type_map = {"F": "Full-Time", "P": "Part-Time", "H": "Half-Time", "L": "Unknown"}
