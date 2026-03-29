@@ -8,8 +8,6 @@ Run with:
 
 from __future__ import annotations
 
-import textwrap
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -79,9 +77,6 @@ st.markdown(
         border-radius: 6px;
         border: 1px solid #4b6b9c;
     }
-    .filter-panel div[data-testid="stSlider"] > div > div {
-        color: #e5e7eb;
-    }
     .glass-panel {
         background: rgba(15, 23, 42, 0.92);
         border-radius: 18px;
@@ -91,6 +86,28 @@ st.markdown(
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
     }
+    .accuracy-card {
+        background: linear-gradient(180deg, #1e293b, #0f172a);
+        border-radius: 12px;
+        padding: 18px 12px;
+        border: 1px solid #334155;
+        margin-top: 15px;
+        text-align: center;
+        min-height: 380px;
+    }
+    .accuracy-card h5 {
+        color: #94a3b8;
+        font-size: 0.85rem;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .accuracy-card p {
+        color: #f1f5f9;
+        font-size: 0.75rem;
+        line-height: 1.4;
+        margin-bottom: 0;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -98,7 +115,7 @@ st.markdown(
 
 @st.cache_data(show_spinner=False)
 def get_raw_data() -> pd.DataFrame:
-    return load_feature_table(sample_frac=0.03)
+    return load_feature_table()
 
 @st.cache_resource(show_spinner=False)
 def get_trained_model(df: pd.DataFrame):
@@ -129,25 +146,76 @@ def kpi_card(label: str, value: str, help_text: str | None = None):
             st.caption(help_text)
 
 def render_filters(df: pd.DataFrame) -> pd.DataFrame:
-    term = st.selectbox("Term", options=["All"] + sorted(df["Term"].unique().tolist()), key="filter_term")
-    dept = st.selectbox("Department", options=["All"] + sorted(df["Dept_Code"].unique().tolist()), key="filter_dept")
-    publisher = st.selectbox("Publisher", options=["All"] + sorted(df["Publisher"].unique().tolist()), key="filter_publisher")
+    college = st.selectbox("College", options=["All"] + sorted(df["College"].unique().tolist()), key="filter_college")
+    year    = st.selectbox("Year",    options=["All"] + sorted(df["Year"].unique().tolist()),    key="filter_year")
+    dept    = st.selectbox("Department", options=["All"] + sorted(df["Dept_Code"].unique().tolist()), key="filter_dept")
+    sem     = st.selectbox("Semester", options=["All"] + sorted(df["Semester"].unique().tolist()), key="filter_sem")
     student_type = st.selectbox("Student Type", options=["All"] + sorted(df["Student_Type"].unique().tolist()), key="filter_student_type")
-    fmt = st.selectbox("Format", options=["All"] + sorted(df["Format"].unique().tolist()), key="filter_format")
 
     mask = pd.Series(True, index=df.index)
-    if term != "All":
-        mask &= df["Term"] == term
+    if college != "All":
+        mask &= df["College"] == college
+    if year != "All":
+        mask &= df["Year"] == year
     if dept != "All":
         mask &= df["Dept_Code"] == dept
-    if publisher != "All":
-        mask &= df["Publisher"] == publisher
+    if sem != "All":
+        mask &= df["Semester"] == sem
     if student_type != "All":
         mask &= df["Student_Type"] == student_type
-    if fmt != "All":
-        mask &= df["Format"] == fmt
 
     return df[mask].copy()
+
+def render_accuracy_gauge(acc: float):
+    st.markdown('<div class="accuracy-card">', unsafe_allow_html=True)
+    st.markdown("<h5>Model Accuracy</h5>", unsafe_allow_html=True)
+    
+    # Custom Speedometer Needle Calculation
+    value = acc * 100
+    angle = 180 - (value * 1.8) 
+    rad = np.radians(angle)
+    x = 0.5 + 0.35 * np.cos(rad)
+    y = 0.5 + 0.35 * np.sin(rad)
+
+    fig = go.Figure()
+
+    # Gauge Arc
+    fig.add_trace(go.Indicator(
+        mode = "gauge+number",
+        value = value,
+        domain = {'x': [0, 1], 'y': [0, 1]},
+        number = {'font': {'size': 32, 'color': "#f1f5f9"}, 'suffix': "%"},
+        gauge = {
+            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "#94a3b8"},
+            'bar': {'color': "rgba(0,0,0,0)"}, 
+            'bgcolor': "rgba(0,0,0,0)",
+            'borderwidth': 0,
+            'steps': [
+                {'range': [0, 60], 'color': 'rgba(239, 68, 68, 0.4)'},
+                {'range': [60, 85], 'color': 'rgba(234, 179, 8, 0.4)'},
+                {'range': [85, 100], 'color': 'rgba(34, 197, 94, 0.4)'}
+            ],
+        }
+    ))
+
+    # Needle
+    fig.add_shape(type='line', x0=0.5, y0=0.5, x1=x, y1=y, line=dict(color='white', width=4))
+    fig.add_shape(type='circle', x0=0.48, y0=0.48, x1=0.52, y1=0.52, fillcolor='white', line_color='white')
+
+    fig.update_layout(
+        height=260,
+        margin=dict(l=20, r=20, t=10, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        font={'color': "#94a3b8", 'family': "Inter"}
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown(
+        f"<p style='margin-top: -20px;'>The Random Forest model is predicting student behavior with <b>{acc*100:.1f}%</b> accuracy via high-friction signal points.</p>",
+        unsafe_allow_html=True
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
 
 def render_header():
     left, right = st.columns([4, 1])
@@ -155,161 +223,61 @@ def render_header():
         st.markdown("### University Bulk Order & Predictive Procurement Analytics")
         st.caption("Machine-learning driven demand forecasting and risk segmentation with Investor ROI Modeling.")
     with right:
-        st.markdown(
-            """
-            <div style="text-align: right; font-size: 0.8rem; color: #9ca3af;">
-                <div>Today</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div style="text-align: right; font-size: 0.8rem; color: #9ca3af;"><div>Today</div></div>', unsafe_allow_html=True)
 
 def render_top_kpis(df: pd.DataFrame):
-    total_pred_units = df["Predicted_Demand_Units"].sum()
-
-    digital_share = (
-        (df["Format"] == "Digital").sum() / len(df) if len(df) else 0
-    )
-    physical_share = 1 - digital_share
-
-    high_risk_rate = (df["Opt_Out_Probability"] > 0.6).mean() if len(df) else 0
+    if df.empty:
+        st.warning("No data for current filter selection.")
+        return
+    students_buying = int((df["Predicted_Purchase_Prob"] >= 0.5).sum())
+    total_spend = df["Projected_Spend"].sum()
+    total = len(df)
+    pt_count = (df["Student_Type"] == "Part-Time").sum()
+    ft_count = (df["Student_Type"] == "Full-Time").sum()
+    pt_pct = pt_count / total * 100 if total else 0
+    ft_pct = ft_count / total * 100 if total else 0
+    buying     = (df["Predicted_Purchase_Prob"] >= 0.5).sum()
+    not_buying = total - buying
+    ratio_str  = f"{buying:,} : {not_buying:,}"
 
     c1, c2, c3 = st.columns(3)
-    with c1:
-        kpi_card("Total Predicted Demand", f"{int(total_pred_units):,} Units")
-    with c2:
-        kpi_card(
-            "Digital vs Physical",
-            f"{digital_share*100:.0f}% / {physical_share*100:.0f}%",
-            "Share of predicted units",
-        )
-    with c3:
-        kpi_card(
-            "High-Risk Opt-Out Rate",
-            f"{high_risk_rate*100:.0f}%",
-            "Share of records with Opt-Out Probability > 60%",
-        )
+    with c1: kpi_card("Students Predicted to Buy", f"{students_buying:,}", f"Projected Spend: ${total_spend:,.0f}")
+    with c2: kpi_card("Part-Time vs Full-Time", f"{pt_pct:.0f}% / {ft_pct:.0f}%", f"{pt_count:,} part-time · {ft_count:,} full-time")
+    with c3: kpi_card("Buy vs Not-Buy Ratio", ratio_str, "Predicted opt-in : predicted opt-out")
 
 def render_book_quantities(df: pd.DataFrame):
-    st.markdown("#### Quantity of Each Book")
+    st.markdown("#### Quantity of Each Book (Volume Forecast)")
     if df.empty:
         st.info("No data available.")
         return
-
     agg = df.groupby("Title")["Predicted_Demand_Units"].sum().reset_index()
-    agg = agg.sort_values(by="Predicted_Demand_Units", ascending=True).tail(15)
-
-    fig = px.bar(
-        agg, x="Predicted_Demand_Units", y="Title", orientation="h",
-        color="Predicted_Demand_Units", color_continuous_scale="Viridis",
-    )
-    fig.update_layout(
-        height=320, margin=dict(l=0, r=0, t=10, b=0),
-        xaxis_title="Predicted Units", yaxis_title="",
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#f9fafb"), coloraxis_showscale=False,
-    )
+    agg = agg.sort_values(by="Predicted_Demand_Units", ascending=False).head(20)
+    fig = px.bar(agg, x="Title", y="Predicted_Demand_Units", color="Predicted_Demand_Units", color_continuous_scale="Viridis")
+    fig.update_layout(height=450, margin=dict(l=0, r=0, t=30, b=0), xaxis_title="", yaxis_title="Predicted Units", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#f9fafb"), coloraxis_showscale=False)
+    fig.update_xaxes(tickangle=45)
     st.plotly_chart(fig, use_container_width=True)
 
 def render_feature_importance(fi: pd.DataFrame):
     st.markdown("#### Feature Importance (Model Explainability)")
-    fig = px.bar(
-        fi.sort_values("Importance"), x="Importance", y="Feature", orientation="h",
-        color="Importance", color_continuous_scale="Blues",
-    )
-    fig.update_layout(
-        height=320, margin=dict(l=0, r=0, t=10, b=0),
-        xaxis_title="Relative Importance", yaxis_title="Feature",
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#f9fafb"), coloraxis_showscale=False,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-def render_publisher_risk_matrix(df: pd.DataFrame):
-    st.markdown("#### Publisher Risk Matrix")
-    if df.empty:
-        st.info("No data.")
-        return
-        
-    agg = df.groupby("Publisher").agg(
-        Avg_Price=("Unit_Price", "mean"),
-        Avg_Opt_Out=("Opt_Out_Probability", "mean"),
-        Total_Units=("Predicted_Demand_Units", "sum")
-    ).reset_index()
-    
-    agg = agg[agg["Total_Units"] >= 5]
-    
-    fig = px.scatter(
-        agg, x="Avg_Price", y="Avg_Opt_Out", size="Total_Units",
-        color="Avg_Opt_Out", hover_name="Publisher", color_continuous_scale="Reds", size_max=40
-    )
-    fig.update_layout(
-        height=320, margin=dict(l=0, r=0, t=10, b=0),
-        xaxis_title="Avg Retail Price ($)", yaxis_title="Avg Opt-Out Probability",
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#f9fafb"), coloraxis_showscale=False
-    )
+    fig = px.bar(fi.sort_values("Importance"), x="Importance", y="Feature", orientation="h", color="Importance", color_continuous_scale="Blues")
+    fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0), xaxis_title="Relative Importance", yaxis_title="Feature", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#f9fafb"), coloraxis_showscale=False)
     st.plotly_chart(fig, use_container_width=True)
 
 def render_high_friction_titles(df: pd.DataFrame):
     st.markdown("#### Top 10 High-Friction Titles (Negotiation Targets)")
-    if df.empty:
-        st.info("No data.")
-        return
-    
-    df["Lost_Revenue"] = df["Predicted_Demand_Units"] * df["Opt_Out_Probability"] * df["Unit_Price"]
-    
-    agg = df.groupby(["Title", "Publisher"]).agg(
-        Opt_Out_Rate=("Opt_Out_Probability", "mean"),
-        Lost_Revenue=("Lost_Revenue", "sum")
-    ).reset_index()
-    
-    agg = agg.sort_values(by="Lost_Revenue", ascending=False).head(10)
-    
-    agg["Lost_Revenue"] = agg["Lost_Revenue"].apply(lambda x: f"${x:,.0f}")
-    agg["Opt_Out_Rate"] = agg["Opt_Out_Rate"].apply(lambda x: f"{x*100:.1f}%")
-    
-    m_df = agg.rename(columns={"Title": "Book Title", "Opt_Out_Rate": "Opt-Out %", "Lost_Revenue": "Lost Revenue ($)"})
-    
-    st.dataframe(m_df, use_container_width=True, hide_index=True)
-
-def render_format_preference(df: pd.DataFrame):
-    st.markdown("#### Format Preference by Segment")
-    if df.empty:
-        st.info("No data.")
-        return
-
-    by_student_type = (
-        df.groupby(["Student_Type", "Format"])["Predicted_Demand_Units"].sum().reset_index()
-    )
-    fig = px.bar(
-        by_student_type, x="Student_Type", y="Predicted_Demand_Units", color="Format",
-        barmode="group", color_discrete_sequence=px.colors.qualitative.Pastel,
-    )
-    fig.update_layout(
-        height=320, margin=dict(l=0, r=0, t=10, b=0),
-        xaxis_title="Student Type", yaxis_title="Predicted Units",
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#f9fafb")
-    )
+    if df.empty: return
+    agg = df.groupby("Title")["Opt_Out_Probability"].mean().sort_values(ascending=False).head(10).reset_index()
+    fig = px.bar(agg, x="Opt_Out_Probability", y="Title", orientation="h", color="Opt_Out_Probability", color_continuous_scale="Reds", text_auto='.1%')
+    fig.update_layout(height=320, margin=dict(l=20, r=20, t=20, b=20), xaxis_title="Avg Opt-Out Risk (%)", yaxis_title="", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#f9fafb"), coloraxis_showscale=False)
     st.plotly_chart(fig, use_container_width=True)
 
 def render_word_cloud(df: pd.DataFrame):
     st.markdown("#### Book Names Word Cloud")
-    if df.empty:
-        st.info("No data.")
-        return
-
+    if df.empty: return
     agg = df.groupby("Title")["Predicted_Demand_Units"].sum()
     freq_dict = agg.to_dict()
-    
-    if not freq_dict:
-        return
-
-    wc = WordCloud(
-        width=1200, height=400, background_color=None, mode="RGBA", colormap="Blues",
-    ).generate_from_frequencies(freq_dict)
-
+    if not freq_dict: return
+    wc = WordCloud(width=1200, height=400, background_color=None, mode="RGBA", colormap="Blues").generate_from_frequencies(freq_dict)
     fig, ax = plt.subplots(figsize=(12, 4))
     ax.imshow(wc, interpolation="bilinear")
     ax.axis("off")
@@ -318,53 +286,32 @@ def render_word_cloud(df: pd.DataFrame):
 
 def main():
     raw_df = get_raw_data()
-    clf, fi_df, features = get_trained_model(raw_df)
-
+    clf, fi_df, features, acc = get_trained_model(raw_df)
     render_header()
-    st.markdown("---")
-    
     filters_col, main_col = st.columns([0.9, 4.1])
-
     with filters_col:
-        st.markdown('<div class="filter-panel"><h4>Term & Segments</h4>', unsafe_allow_html=True)
+        st.markdown('<div class="filter-panel"><h4>Student Segments</h4>', unsafe_allow_html=True)
         filtered_df_base = render_filters(raw_df)
-        
-        st.markdown("<hr style='border-color: #304c7a; margin: 15px 0;'>", unsafe_allow_html=True)
-        st.markdown('<h4>What-If Simulator</h4>', unsafe_allow_html=True)
-        discount = st.slider("Publisher Discount (%)", min_value=0, max_value=50, value=0, step=5)
         st.markdown("</div>", unsafe_allow_html=True)
-
-    # Apply Simulation
-    filtered_df = apply_predictions(filtered_df_base, clf, features, discount_pct=discount)
-
+        render_accuracy_gauge(acc)
+    filtered_df = apply_predictions(filtered_df_base, clf, features, discount_pct=0)
     with main_col:
         render_top_kpis(filtered_df)
-
-        st.markdown("### Feature Engineering & Vendor Leverage")
-        upper_left, upper_mid, upper_right = st.columns(3)
-
-        with upper_left:
-            st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
-            render_book_quantities(filtered_df)
-            st.markdown('</div>', unsafe_allow_html=True)
-        with upper_mid:
+        row2_left, row2_right = st.columns(2)
+        with row2_left:
             st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
             render_feature_importance(fi_df)
             st.markdown('</div>', unsafe_allow_html=True)
-        with upper_right:
+        with row2_right:
             st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
-            render_publisher_risk_matrix(filtered_df)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown("### Procurement Planning & Segment Preferences")
-        lower_left, lower_right = st.columns(2)
-        with lower_left:
             render_high_friction_titles(filtered_df)
-        with lower_right:
-            render_format_preference(filtered_df)
-            
-        st.markdown("---")
+            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
+        render_book_quantities(filtered_df)
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
         render_word_cloud(filtered_df)
+        st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()

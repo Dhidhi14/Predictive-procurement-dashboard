@@ -85,6 +85,9 @@ By sampling 3% (configurable via the `sample_frac` parameter) uniformly across a
 The raw columns are transformed to meet the semantic naming conventions utilized by the existing dashboard logic.
 
 * **`Term`**: Synthesized by concatenating `term_code` and `term_year` (e.g., "F 21").
+* **`Year`**: Extracted from `term_year`.
+* **`Semester`**: Mapped from `term_code` (e.g., "F" to "Fall").
+* **`College`**: Derived from the source CSV filename (e.g., "FIU", "EKU").
 * **`Dept_Code`**: Extracted positionally from the `section_id`. 
 * **`Student_Type`**: Safely mapped via `{"F": "Full-Time", "P": "Part-Time"}`.
 
@@ -165,58 +168,20 @@ def get_data() -> tuple[pd.DataFrame, pd.DataFrame]:
 This restricts the heavily intensive `pd.concat` and `clf.fit` routines to the initial server boot sequence.
 
 ### 6.2 Interactive Left Filter Menu
-Users can dynamically constrain the entire dataset. The filter executes boolean masking:
-```python
-mask = pd.Series(True, index=df.index)
-if term != "All":
-    mask &= df["Term"] == term
-```
-Filtering updates the in-memory dataframe, instantly cascading layout repaints across all right-side charts.
+Users can dynamically constrain the entire dataset. The filters available are:
+- **College**
+- **Year**
+-- **Department**
+- **Semester**
+- **Student Type** (Full-time vs Part-time)
 
-### 6.3 Executive KPIs
-The topmost row uses raw HTML `<div>` structures mapping to the `kpi_card` function.
-* **Total Predicted Demand**: Flat summation of `Predicted_Demand_Units` across the filtered dataset.
-* **Total Projected Spend**: Summation of `Projected_Spend` mathematically rounded to `Millions (M)` for readability.
-* **High-Risk Opt-Out Rate**: Computes the mean of any `Opt_Out_Probability` strictly exceeding `0.6` (60%). 
-
-### 6.4 Advanced Data Visualizations
-* **Price Sensitivity (Plotly Scatter)**: Maps `Rental_to_Retail_Ratio` on the X-axis against `Opt_Out_Probability` on the Y-Axis. Hovering over plots triggers tooltip arrays revealing underlying publishers. Visualizes exactly where the "tipping point" for pricing margins exists.
-* **Feature Importance (Plotly Bar)**: A horizontal representation of the Gini impurity outputs fed explicitly from the ML script. 
-* **Format Preferences (Grouped Bar)**: Stacks physical vs. digital demand distinctly segmented by `Student_Type` (e.g. Part-Time students heavily lean towards Digital formats based on commuting friction).
+#### 6.2.1 Sidebar Accuracy Gauge
+Positioned directly below the filter panel is a **Model Accuracy Gauge**. This provides real-time transparency into the machine learning model's performance (calculated via `clf.score`). It uses a color-coded speedometer design scaled from 0% to 100% to indicate the reliability of the current predictions.
 
 ---
-
-## 7. Target Database Schema (`schema.sql`)
-
-While the current Python application leverages Pandas over CSV execution, the architectural target maps to a rigid ANSI SQL schema.
-
-1. **`FACT_ENROLLMENTS`**: Stores the absolute grain representing one row per student-course combination. Holds the `actual_purchase_flag` target label.
-2. **`DIM_STUDENT_MASTER`**: Handles demographic normalization (`financial_condition`, `commuter_distance`).
-3. **`DIM_ADOPTIONS`**: Separates textbook attributes to reduce data redundancy, handling `retail_new_price`, `is_digital`.
-4. **`DIM_SECTIONS`**: Groups logical instances like courses, terms, modalities, and instructors.
-
----
-
-## 8. Deployment and Execution
-
-### System Requirements
-* Python 3.9+
-* Memory: 4GB+ RAM (Due to Pandas internal fragmentation)
-
-### Packages
-* `streamlit`
-* `pandas`
-* `numpy`
-* `scikit-learn`
-* `plotly`
 
 ### Launch the Application
 To run the server natively in development:
 ```bash
-# 1. Activate the custom python virtual environment
-source .venv/bin/activate
-
-# 2. Start the Streamlit server
-streamlit run dashboard_app.py
+source .venv/bin/activate && streamlit run dashboard_app.py
 ```
-Upon execution, it will display a local WebServer URL (default: `localhost:8501`) and standard network execution URLs. The initial load heavily burdens the CPU for ~15 seconds while training the model against the 400k+ extracted rows; however, performance normalizes to near-0ms latency post-boot.
