@@ -261,7 +261,7 @@ def render_feature_importance(fi: pd.DataFrame):
     st.markdown("#### Feature Importance (Model Explainability)")
     fig = px.bar(fi.sort_values("Importance"), x="Importance", y="Feature", orientation="h", color="Importance", color_continuous_scale="Blues")
     fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0), xaxis_title="Relative Importance", yaxis_title="Feature", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#f9fafb"), coloraxis_showscale=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fi, use_container_width=True)
 
 def render_high_friction_titles(df: pd.DataFrame):
     st.markdown("#### Top 10 High-Friction Titles (Negotiation Targets)")

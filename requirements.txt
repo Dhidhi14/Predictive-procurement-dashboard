@@ -4,5 +4,6 @@ pandas>=2.0,<2.2
 numpy>=1.26.0
 scikit-learn>=1.2,<1.4
 wordcloud>=1.9.0
-matplotlib>=3.7.0
+xgboost>=2.1.0
+matplotlib>=3.10.8
 dask[dataframe]>=2023.5.0

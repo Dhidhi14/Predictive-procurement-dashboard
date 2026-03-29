@@ -55,6 +55,32 @@ _DTYPES = {
     "will_buy":                  "float32",
 }
 
+def load_master_data(data_dir: str = "new/Cleaned", load_all: bool = True) -> pd.DataFrame:
+    """
+    Load all CSV files from the Cleaned folder and create a single master dataframe.
+    """
+    file_pattern = os.path.join(data_dir, "*_frac.csv")
+    csv_files = sorted(glob.glob(file_pattern))
+    
+    if not csv_files:
+        raise FileNotFoundError(f"No CSV files found in {data_dir} matching pattern {file_pattern}")
+    
+    print(f"Found {len(csv_files)} CSV files to load...")
+    
+    dfs = []
+    for f in csv_files:
+        try:
+            df = pd.read_csv(f, engine='c')
+            print(f"  Loaded: {os.path.basename(f)} ({len(df)} rows)")
+            dfs.append(df)
+        except Exception as e:
+            print(f"  Error reading {f}: {e}")
+    
+    if not dfs:
+        raise ValueError("No CSV files could be loaded successfully")
+    
+    master_df = pd.concat(dfs, ignore_index=True)
+    return master_df
 
 def load_feature_table(
     data_dir: str = "new/Cleaned",
@@ -64,15 +90,6 @@ def load_feature_table(
 ) -> pd.DataFrame:
     """
     Load the Cleaned dataset in a memory-safe manner.
-
-    Process:
-      1. Find all *_frac.csv files in data_dir.
-      2. Read each file in fixed-size chunks (chunk_size rows at a time).
-      3. Sample `sample_frac` fraction of each chunk and discard the rest.
-      4. Concatenate ONLY the sampled rows.
-      5. Engineer features on the small resulting DataFrame.
-
-    This ensures the system never holds more than ~one chunk per file in RAM.
     """
     file_pattern = os.path.join(data_dir, "*_frac.csv")
     csv_files = sorted(glob.glob(file_pattern))
@@ -96,15 +113,13 @@ def load_feature_table(
                 chunksize=chunk_size,
                 on_bad_lines="skip",
             )
-            # Derive college name from filename e.g. Student_Book_Interactions_fiu_frac.csv -> FIU
             college_name = os.path.basename(filepath).replace("Student_Book_Interactions_", "").replace("_frac.csv", "").upper()
             for chunk in reader:
-                # Sample the chunk immediately, then discard the full chunk
                 n_keep = max(1, int(len(chunk) * sample_frac))
                 sampled = chunk.sample(n=n_keep, random_state=int(rng.integers(0, 2**31)))
                 sampled["College"] = college_name
                 sampled_chunks.append(sampled)
-                del chunk          # free the full chunk right away
+                del chunk
                 gc.collect()
 
         except Exception as exc:
@@ -119,13 +134,9 @@ def load_feature_table(
 
     print(f"  ✓ Sampled {len(df):,} rows from {len(csv_files)} files. Engineering features …")
 
-    # ------------------------------------------------------------------ #
-    # Feature engineering (done on the small sampled DataFrame in-place)  #
-    # ------------------------------------------------------------------ #
-
     # --- Categorical mappings ---
     df["Term"] = df["term_code"].fillna("?") + " " + df["term_year"].astype(str)
-    df["Year"]     = df["term_year"].astype(str)   # e.g. "21", "22", "23"
+    df["Year"]     = df["term_year"].astype(str)
     df["Semester"] = df["term_code"].fillna("?").map({"F": "Fall", "W": "Winter", "S": "Spring", "A": "Annual"}).fillna(df["term_code"])
 
     def _dept(sec: str) -> str:
@@ -156,7 +167,7 @@ def load_feature_table(
     df["Actual_Purchase_Flag"]   = wb.astype("float32")
     df["Opt_Out_Probability"]    = (1.0 - wb).astype("float32")
 
-    # --- Demand / spend placeholders (model overwrites Predicted_Purchase_Prob) ---
+    # --- Demand / spend placeholders ---
     df["Predicted_Demand_Units"] = 1
     df["Unit_Price"]             = rn.astype("float32")
     df["Predicted_Purchase_Prob"] = wb.astype("float32")
@@ -168,7 +179,7 @@ def load_feature_table(
     df["has_loan"]             = df["has_loan"].fillna(0.0).astype("float32")
     df["is_rental"]            = df["is_rental"].fillna(0.0).astype("float32")
 
-    # --- Synthetic proxies (lightweight) ---
+    # --- Synthetic proxies ---
     df["Major_Alignment_Score"] = rng.uniform(0.5, 1.0, size=len(df)).astype("float32")
     df["Commuter_Friction"]     = rng.uniform(0.1, 0.9, size=len(df)).astype("float32")
 
@@ -183,5 +194,4 @@ def load_feature_table(
 
     return df[output_cols].reset_index(drop=True)
 
-
-__all__ = ["load_feature_table"]
+__all__ = ["load_master_data", "load_feature_table"]
