@@ -19,7 +19,10 @@
 
 The **Predictive Procurement Analytics System** addresses a fundamental operational inefficiency in higher education: the over-ordering of physical textbooks and course materials. Historically, universities order textbooks assuming 100% of enrolled students will purchase them. In reality, students frequently opt-out of university-provided bundles due to high costs, utilizing secondary markets, renting, or pirating materials instead. This leads to massive sunk inventory costs.
 
-This project implements a sophisticated data mining and machine learning pipeline to analyze historical transactions, student demographics, and product pricing. It predicts exactly which students are likely to opt-out, calculates the projected financial spend, and surfaces these insights to procurement executives via an interactive Streamlit dashboard. 
+This project implements- **Glassmorphism Interface**: Deep navy gradients (`#1b2b4a` to `#020309`) with blurred translucent panels.
+- **Rectangular Header Pills**: All chart and KPI titles are housed in custom, high-visibility "pills" with subtle borders and inset shadow effects.
+- **Responsive 4-Row Layout**: Scientifically organized for data-to-pixel density.
+ demographics, and product pricing. It predicts exactly which students are likely to opt-out, calculates the projected financial spend, and surfaces these insights to procurement executives via an interactive Streamlit dashboard. 
 
 ---
 

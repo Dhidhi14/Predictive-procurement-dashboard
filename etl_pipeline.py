@@ -38,12 +38,12 @@ _NEEDED_COLS = [
 ]
 
 _DTYPES = {
-    "sis_user_id":               "object",
-    "section_id":                "object",
-    "term_code":                 "object",
-    "term_year":                 "object",
-    "author":                    "object",
-    "student_full_part_time_status": "object",
+    "sis_user_id":               "category",
+    "section_id":                "category",
+    "term_code":                 "category",
+    "term_year":                 "category",
+    "author":                    "category",
+    "student_full_part_time_status": "category",
     "ebook_ind":                 "float32",
     "retail_new":                "float32",
     "retail_new_rent":           "float32",
@@ -84,7 +84,7 @@ def load_master_data(data_dir: str = "new/Cleaned", load_all: bool = True) -> pd
 
 def load_feature_table(
     data_dir: str = "new/Cleaned",
-    sample_frac: float = 0.01,
+    sample_frac: float = 1.0,
     chunk_size: int = 50_000,
     seed: int = 42,
 ) -> pd.DataFrame:
@@ -135,17 +135,18 @@ def load_feature_table(
     print(f"  ✓ Sampled {len(df):,} rows from {len(csv_files)} files. Engineering features …")
 
     # --- Categorical mappings ---
-    df["Term"] = df["term_code"].fillna("?") + " " + df["term_year"].astype(str)
-    df["Year"]     = df["term_year"].astype(str)
-    df["Semester"] = df["term_code"].fillna("?").map({"F": "Fall", "W": "Winter", "S": "Spring", "A": "Annual"}).fillna(df["term_code"])
+    df["Term"]     = (df["term_code"].astype(str) + " " + df["term_year"].astype(str)).astype("category")
+    df["Year"]     = df["term_year"].astype(str).astype("category")
+    df["Semester"] = df["term_code"].map({"F": "Fall", "W": "Winter", "S": "Spring", "A": "Annual"}).fillna("Other").astype("category")
 
     def _dept(sec: str) -> str:
         parts = str(sec).split("-")
         return parts[3] if len(parts) > 3 else "GEN"
 
-    df["Dept_Code"]    = df["section_id"].map(_dept)
-    df["Title"]        = df["title"].fillna("Unknown Title").astype(str)
-    df["Publisher"]    = df["author"].fillna("Unknown").astype(str).str.slice(0, 20)
+    df["Dept_Code"]    = df["section_id"].map(_dept).astype("category")
+    df["College"]      = df["College"].astype("category")
+    df["Title"]        = df["title"].fillna("Unknown Title").astype("category")
+    df["Publisher"]    = df["author"].fillna("Unknown").astype(str).str.slice(0, 20).astype("category")
     df["Student_Type"] = df["student_full_part_time_status"].map(
         {"F": "Full-Time", "P": "Part-Time", "H": "Half-Time"}
     ).fillna("Full-Time")

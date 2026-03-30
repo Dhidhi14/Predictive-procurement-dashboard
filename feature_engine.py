@@ -46,8 +46,8 @@ def train_model(df: pd.DataFrame):
     # NOTE: n_jobs=1 (single-threaded) is intentional.
     # n_jobs=-1 spawns one process per CPU core, each holding a full copy of
     # the training data in RAM — that is what previously caused the system crash.
-    # Cap training rows to 50k so .fit() memory stays bounded.
-    MAX_TRAIN = 50_000
+    # Cap training rows to 100k so .fit() memory stays bounded and trains fast.
+    MAX_TRAIN = 100_000
     if len(train_df) > MAX_TRAIN:
         train_df = train_df.sample(n=MAX_TRAIN, random_state=42)
         X = train_df[features]
