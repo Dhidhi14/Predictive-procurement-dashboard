@@ -1,33 +1,63 @@
 """
 ETL pipeline for the Predictive Procurement Analytics project.
 
-This module ingests real augmented data from the university SIS/ERP,
-cleans/normalizes the datasets, and prepares feature tables for the ML models
-and dashboard.
+Memory-safe strategy:
+- Reads each of the 11 Cleaned CSVs ONE AT A TIME with chunked iteration.
+- Samples a small fraction (default 1%) from each chunk before appending.
+- Never holds more than one chunk in RAM at a time.
+- Returns a single small Pandas DataFrame suitable for ML and the dashboard.
 """
 
 from __future__ import annotations
 
+import gc
 import glob
 import os
-import pandas as pd
+
 import numpy as np
+import pandas as pd
+
+# Columns we actually need — reading only these avoids loading unnecessary data
+_NEEDED_COLS = [
+    "sis_user_id",
+    "section_id",
+    "term_code",
+    "term_year",
+    "title",
+    "author",
+    "ebook_ind",
+    "retail_new",
+    "retail_new_rent",
+    "price_affordability_score",
+    "family_annual_income",
+    "has_scholarship",
+    "has_loan",
+    "is_rental",
+    "will_buy",
+    "student_full_part_time_status",
+]
+
+_DTYPES = {
+    "sis_user_id":               "category",
+    "section_id":                "category",
+    "term_code":                 "category",
+    "term_year":                 "category",
+    "author":                    "category",
+    "student_full_part_time_status": "category",
+    "ebook_ind":                 "float32",
+    "retail_new":                "float32",
+    "retail_new_rent":           "float32",
+    "price_affordability_score": "float32",
+    "family_annual_income":      "float32",
+    "has_scholarship":           "float32",
+    "has_loan":                  "float32",
+    "is_rental":                 "float32",
+    "will_buy":                  "float32",
+}
 
 def load_master_data(data_dir: str = "new/Cleaned", load_all: bool = True) -> pd.DataFrame:
     """
     Load all CSV files from the Cleaned folder and create a single master dataframe.
-    
-    Parameters:
-    -----------
-    data_dir : str
-        Directory path containing the CSV files (default: "new/Cleaned")
-    load_all : bool
-        If True, load all data. If False, load a sample (default: True)
-    
-    Returns:
-    --------
-    pd.DataFrame
-        Master dataframe containing all data from all CSV files
     """
     file_pattern = os.path.join(data_dir, "*_frac.csv")
     csv_files = sorted(glob.glob(file_pattern))
@@ -49,101 +79,120 @@ def load_master_data(data_dir: str = "new/Cleaned", load_all: bool = True) -> pd
     if not dfs:
         raise ValueError("No CSV files could be loaded successfully")
     
-    # Concatenate all dataframes into one master dataframe
     master_df = pd.concat(dfs, ignore_index=True)
-    print(f"\nMaster dataframe created with {len(master_df)} total rows and {len(master_df.columns)} columns")
-    
     return master_df
 
-def load_feature_table(data_dir: str = "new/Cleaned", sample_frac: float = 0.05, seed: int = 42) -> pd.DataFrame:
+def load_feature_table(
+    data_dir: str = "new/Cleaned",
+    sample_frac: float = 1.0,
+    chunk_size: int = 50_000,
+    seed: int = 42,
+) -> pd.DataFrame:
     """
-    Load and map the augmented real dataset to the dashboard schema.
-    Since the dataset is very large, sample_frac allows loading a subset to keep the dashboard responsive.
+    Load the Cleaned dataset in a memory-safe manner.
     """
     file_pattern = os.path.join(data_dir, "*_frac.csv")
-    csv_files = glob.glob(file_pattern)
-    
+    csv_files = sorted(glob.glob(file_pattern))
+    csv_files = [f for f in csv_files if not os.path.basename(f).startswith(".~lock")]
+
     if not csv_files:
-        raise FileNotFoundError(f"No CSV files found matching {file_pattern}")
-        
-    dfs = []
-    # Use a fixed random generator
+        raise FileNotFoundError(f"No CSV files found matching: {file_pattern}")
+
     rng = np.random.default_rng(seed)
-    
-    for f in csv_files:
+    sampled_chunks: list[pd.DataFrame] = []
+
+    for filepath in csv_files:
+        fname = os.path.basename(filepath)
+        print(f"  → Reading {fname} …", flush=True)
+
         try:
-            # We sample a fraction to keep memory footprint low
-            df = pd.read_csv(f, engine='c')
-            if sample_frac < 1.0:
-                df = df.sample(frac=sample_frac, random_state=seed)
-            dfs.append(df)
-        except Exception as e:
-            print(f"Error reading {f}: {e}")
-            
-    if not dfs:
+            reader = pd.read_csv(
+                filepath,
+                usecols=lambda c: c in _NEEDED_COLS,
+                dtype=_DTYPES,
+                chunksize=chunk_size,
+                on_bad_lines="skip",
+            )
+            college_name = os.path.basename(filepath).replace("Student_Book_Interactions_", "").replace("_frac.csv", "").upper()
+            for chunk in reader:
+                n_keep = max(1, int(len(chunk) * sample_frac))
+                sampled = chunk.sample(n=n_keep, random_state=int(rng.integers(0, 2**31)))
+                sampled["College"] = college_name
+                sampled_chunks.append(sampled)
+                del chunk
+                gc.collect()
+
+        except Exception as exc:
+            print(f"    ⚠ Skipping {fname}: {exc}")
+
+    if not sampled_chunks:
         return pd.DataFrame()
-        
-    df = pd.concat(dfs, ignore_index=True)
-    
-    # Map physical columns to what the dashboard and model expect
-    mapped_df = pd.DataFrame()
-    
-    mapped_df["Term"] = df["term_code"].fillna("Unknown") + " " + df["term_year"].astype(str)
-    
-    # Extract dept from section_id if possible (e.g. BN-8304-1-126-A-... -> 126 is dept?)
-    def extract_dept(sec):
+
+    df = pd.concat(sampled_chunks, ignore_index=True)
+    del sampled_chunks
+    gc.collect()
+
+    print(f"  ✓ Sampled {len(df):,} rows from {len(csv_files)} files. Engineering features …")
+
+    # --- Categorical mappings ---
+    df["Term"]     = (df["term_code"].astype(str) + " " + df["term_year"].astype(str)).astype("category")
+    df["Year"]     = df["term_year"].astype(str).astype("category")
+    df["Semester"] = df["term_code"].map({"F": "Fall", "W": "Winter", "S": "Spring", "A": "Annual"}).fillna("Other").astype("category")
+
+    def _dept(sec: str) -> str:
         parts = str(sec).split("-")
         return parts[3] if len(parts) > 3 else "GEN"
-    mapped_df["Dept_Code"] = df["section_id"].apply(extract_dept)
-    
-    mapped_df["Title"] = df["title"].fillna("Unknown Title").astype(str)
-    mapped_df["Publisher"] = df["author"].fillna("Unknown Author").astype(str).str.slice(0, 20)
-    
-    student_type_map = {"F": "Full-Time", "P": "Part-Time", "H": "Half-Time", "L": "Unknown"}
-    mapped_df["Student_Type"] = df["student_full_part_time_status"].map(student_type_map).fillna("Full-Time")
-    
-    mapped_df["Format"] = df["ebook_ind"].apply(lambda x: "Digital" if x == 1.0 else "Physical")
-    
-    # Pricing & Economic Features
-    retail_new = pd.to_numeric(df["retail_new"], errors='coerce').fillna(100.0)
-    retail_rent = pd.to_numeric(df["retail_new_rent"], errors='coerce').fillna(50.0)
-    
-    retail_new_safe = retail_new.replace(0.0, 100.0)
-    ratio = retail_rent / retail_new_safe
-    mapped_df["Rental_to_Retail_Ratio"] = ratio.clip(0.0, 1.5)
-    
-    # Avoid zero division Arbitrage_Index
-    mapped_df["Arbitrage_Index"] = 1.0 - mapped_df["Rental_to_Retail_Ratio"]
-    
-    # Wallet pressure
-    afford_score = pd.to_numeric(df["price_affordability_score"], errors='coerce').fillna(300.0)
-    max_score = afford_score.max() if afford_score.max() > 0 else 1.0
-    mapped_df["Wallet_Pressure_Score"] = (afford_score / max_score).clip(0.0, 1.0)
-    
-    mapped_df["Digital_Lock_Flag"] = df["ebook_ind"].fillna(0.0)
-    
-    # Synthetic proxies
-    mapped_df["Major_Alignment_Score"] = rng.uniform(0.5, 1.0, size=len(mapped_df))
-    mapped_df["Commuter_Friction"] = rng.uniform(0.1, 0.9, size=len(mapped_df))
-    
-    # Labels
-    will_buy = pd.to_numeric(df["will_buy"], errors='coerce').fillna(1)
-    mapped_df["Actual_Purchase_Flag"] = will_buy
-    mapped_df["Opt_Out_Probability"] = 1.0 - will_buy
-    
-    mapped_df["Predicted_Demand_Units"] = 1
-    mapped_df["Unit_Price"] = retail_new.clip(0.01) # Avoid zero price entirely
-    
-    # By default set pred to actual, ML model replaces this
-    mapped_df["Predicted_Purchase_Prob"] = will_buy
-    mapped_df["Projected_Spend"] = mapped_df["Predicted_Demand_Units"] * mapped_df["Unit_Price"] * mapped_df["Predicted_Purchase_Prob"]
-    
-    # Raw features for ML
-    mapped_df["family_annual_income"] = pd.to_numeric(df["family_annual_income"], errors='coerce').fillna(40000)
-    mapped_df["has_scholarship"] = pd.to_numeric(df["has_scholarship"], errors='coerce').fillna(0)
-    mapped_df["has_loan"] = pd.to_numeric(df["has_loan"], errors='coerce').fillna(0)
-    mapped_df["is_rental"] = pd.to_numeric(df["is_rental"], errors='coerce').fillna(0)
-    
-    return mapped_df
+
+    df["Dept_Code"]    = df["section_id"].map(_dept).astype("category")
+    df["College"]      = df["College"].astype("category")
+    df["Title"]        = df["title"].fillna("Unknown Title").astype("category")
+    df["Publisher"]    = df["author"].fillna("Unknown").astype(str).str.slice(0, 20).astype("category")
+    df["Student_Type"] = df["student_full_part_time_status"].map(
+        {"F": "Full-Time", "P": "Part-Time", "H": "Half-Time"}
+    ).fillna("Full-Time")
+    df["Format"] = df["ebook_ind"].fillna(0).map(lambda x: "Digital" if x == 1.0 else "Physical")
+
+    # --- Economic features ---
+    rn  = df["retail_new"].fillna(100.0).clip(lower=0.01)
+    rr  = df["retail_new_rent"].fillna(50.0).clip(lower=0.0)
+
+    df["Rental_to_Retail_Ratio"] = (rr / rn).clip(0.0, 1.5).astype("float32")
+    df["Arbitrage_Index"]        = (1.0 - df["Rental_to_Retail_Ratio"]).astype("float32")
+
+    aff = df["price_affordability_score"].fillna(300.0)
+    df["Wallet_Pressure_Score"]  = (aff / 1000.0).clip(0.0, 1.0).astype("float32")
+    df["Digital_Lock_Flag"]      = df["ebook_ind"].fillna(0.0).astype("float32")
+
+    # --- Labels ---
+    wb = df["will_buy"].fillna(1.0)
+    df["Actual_Purchase_Flag"]   = wb.astype("float32")
+    df["Opt_Out_Probability"]    = (1.0 - wb).astype("float32")
+
+    # --- Demand / spend placeholders ---
+    df["Predicted_Demand_Units"] = 1
+    df["Unit_Price"]             = rn.astype("float32")
+    df["Predicted_Purchase_Prob"] = wb.astype("float32")
+    df["Projected_Spend"]        = (df["Unit_Price"] * wb).astype("float32")
+
+    # --- Raw ML inputs ---
+    df["family_annual_income"] = df["family_annual_income"].fillna(40_000.0).astype("float32")
+    df["has_scholarship"]      = df["has_scholarship"].fillna(0.0).astype("float32")
+    df["has_loan"]             = df["has_loan"].fillna(0.0).astype("float32")
+    df["is_rental"]            = df["is_rental"].fillna(0.0).astype("float32")
+
+    # --- Synthetic proxies ---
+    df["Major_Alignment_Score"] = rng.uniform(0.5, 1.0, size=len(df)).astype("float32")
+    df["Commuter_Friction"]     = rng.uniform(0.1, 0.9, size=len(df)).astype("float32")
+
+    output_cols = [
+        "Term", "Year", "Semester", "College", "Dept_Code", "Title", "Publisher", "Student_Type", "Format",
+        "Rental_to_Retail_Ratio", "Arbitrage_Index", "Wallet_Pressure_Score",
+        "Digital_Lock_Flag", "Actual_Purchase_Flag", "Opt_Out_Probability",
+        "Predicted_Demand_Units", "Unit_Price", "Predicted_Purchase_Prob",
+        "Projected_Spend", "family_annual_income", "has_scholarship",
+        "has_loan", "is_rental", "Major_Alignment_Score", "Commuter_Friction",
+    ]
+
+    return df[output_cols].reset_index(drop=True)
 
 __all__ = ["load_master_data", "load_feature_table"]

@@ -14,6 +14,7 @@ def train_model(df: pd.DataFrame):
         clf: Trained RandomForestClassifier
         fi: DataFrame with feature importances
         features: list of feature names used
+        acc: accuracy score (float)
     """
     features = [
         "Arbitrage_Index",
@@ -27,30 +28,43 @@ def train_model(df: pd.DataFrame):
     target = "Actual_Purchase_Flag"
     
     if df.empty:
-        return None, pd.DataFrame(columns=["Feature", "Importance"]), features
+        return None, pd.DataFrame(columns=["Feature", "Importance"]), features, 0.0
         
     train_df = df.dropna(subset=features + [target])
     
     if len(train_df) < 50:
         default_fi = pd.DataFrame({"Feature": features, "Importance": [1.0/len(features)]*len(features)})
-        return None, default_fi, features
+        return None, default_fi, features, 0.0
         
     X = train_df[features]
     y = train_df[target]
     
     if len(y.unique()) < 2:
         default_fi = pd.DataFrame({"Feature": features, "Importance": [1.0/len(features)]*len(features)})
-        return None, default_fi, features
+        return None, default_fi, features, 0.0
     
-    clf = RandomForestClassifier(n_estimators=50, max_depth=5, random_state=42, n_jobs=-1)
+    # NOTE: n_jobs=1 (single-threaded) is intentional.
+    # n_jobs=-1 spawns one process per CPU core, each holding a full copy of
+    # the training data in RAM — that is what previously caused the system crash.
+    # Cap training rows to 100k so .fit() memory stays bounded and trains fast.
+    MAX_TRAIN = 100_000
+    if len(train_df) > MAX_TRAIN:
+        train_df = train_df.sample(n=MAX_TRAIN, random_state=42)
+        X = train_df[features]
+        y = train_df[target]
+
+    clf = RandomForestClassifier(n_estimators=50, max_depth=5, random_state=42, n_jobs=1)
     clf.fit(X, y)
+    
+    # Calculate accuracy on the training pool (proxy for model health)
+    acc = clf.score(X, y)
     
     fi = pd.DataFrame({
         "Feature": features,
         "Importance": clf.feature_importances_
     })
     
-    return clf, fi, features
+    return clf, fi, features, acc
 
 def apply_predictions(df: pd.DataFrame, clf: object, features: list, discount_pct: float = 0.0) -> pd.DataFrame:
     """
