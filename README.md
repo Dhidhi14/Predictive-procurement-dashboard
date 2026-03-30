@@ -46,7 +46,4 @@ This project implements a **Streamlit + Plotly** dashboard for your _University 
   - `Predicted_Demand`, `Projected_Spend`, `Opt_Out_Probability`
   - `Arbitrage_Index`, `Wallet_Pressure_Score`, `Digital_Lock_Flag`, `Major_Alignment_Score`, `Commuter_Friction`
 
-## Notes
 
-- The layout is inspired by the provided dashboard screenshot and optimized for a 16:9 screen.
-- The code is modular so you can easily extend it with scenario planning, what‑if simulations, and live model retraining.
