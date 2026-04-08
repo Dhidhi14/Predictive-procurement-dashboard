@@ -3,11 +3,14 @@ import numpy as np
 import os
 
 def precompute():
-    input_path = "/home/iiitl/Documents/DATA mining project/new/master_data/master_data.csv"
-    output_path = "/home/iiitl/Documents/DATA mining project/resource/summary_kpis.csv"
     
-    if not os.path.exists("/home/iiitl/Documents/DATA mining project/resource"):
-        os.makedirs("/home/iiitl/Documents/DATA mining project/resource")
+    # Relative Path
+    input_path = "new/master_data/master_data.csv"
+    output_path = "resource/summary_kpis.csv"
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    print("File exists:", os.path.exists(input_path))
 
     print(f"Starting pre-computation on {input_path}...")
     
