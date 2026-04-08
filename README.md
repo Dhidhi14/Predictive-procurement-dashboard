@@ -19,7 +19,7 @@ A data-driven Streamlit dashboard designed to help universities analyze bulk pur
 
 ## 🗂️ Project Structure
 
-```
+```bash
 Predictive-procurement-dashboard/
 │
 ├── dashboard_app.py            # Main Streamlit dashboard application
@@ -121,7 +121,7 @@ streamlit run dashboard_app.py
 
 Then open your browser and navigate to:
 
-```
+```bash
 Local:    http://localhost:8501
 Network:  http://<your-ip>:8501
 ```
