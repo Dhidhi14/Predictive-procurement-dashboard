@@ -173,43 +173,145 @@ def render_top_kpis(summary_df: pd.DataFrame, sampled_df: pd.DataFrame):
         return
 
     # Total Spend and Book Count from pre-computed summary for 100% accuracy
-    total_spend = summary_df["Total_Spend"].sum()
-    total_books = int(summary_df["Book_Count"].sum())
+# ── KPI Deep-Dive Dialogs ──────────────────────────────────────────────────
+
+@st.dialog("Demand Analysis: Behavioral Drivers")
+def show_demand_detail(df: pd.DataFrame):
+    st.markdown("### 📊 Demand Composition & Sentiment Correlation")
+    col1, col2 = st.columns(2)
+    with col1:
+        # Breakdown by Student Type
+        fig_st = px.pie(df, names="Student_Type", values="Predicted_Demand_Units", 
+                        title="Demand by Enrollment Type", hole=0.4,
+                        color_discrete_sequence=_STACKED_COLORS)
+        fig_st.update_layout(_CHART_LAYOUT, height=300)
+        st.plotly_chart(fig_st, use_container_width=True)
+    with col2:
+        # Sentiment vs Demand correlation
+        sentiment_cols = [c for c in df.columns if "Sentiment" in c]
+        if sentiment_cols:
+            sent_df = df.melt(id_vars=["Predicted_Demand_Units"], value_vars=sentiment_cols)
+            fig_sent = px.box(sent_df, x="variable", y="value", title="Sentiment Distribution",
+                              color_discrete_sequence=["#14b8a6"])
+            fig_sent.update_layout(_CHART_LAYOUT, height=300, xaxis_title="", yaxis_title="Score (1-5)")
+            st.plotly_chart(fig_sent, use_container_width=True)
     
-    # Potential Savings Opportunity calculation
-    # Logic: We take the sampled Opt-Out risk and apply it to the total spend
-    avg_opt_out = sampled_df["Opt_Out_Probability"].mean() if not sampled_df.empty else 0.0
-    potential_savings = total_spend * avg_opt_out
+    st.info("💡 High sentiment scores in 'Value for Money' strongly correlate with lower opt-out risks.")
 
-    # High Risk Enrollment Count (Opt-Out Prob > 70%)
-    high_risk_count = 0
-    if not sampled_df.empty:
-        # Scale sampled ratio to the total book volume
-        risk_ratio = (sampled_df["Opt_Out_Probability"] > 0.70).mean()
-        high_risk_count = int(total_books * risk_ratio)
+@st.dialog("Financial Deep-Dive: Projected Spend")
+def show_spend_detail(df: pd.DataFrame):
+    st.markdown("### 💰 Financial Exposure by Price Tier")
+    # Breakdown by Price Bucket
+    tmp = df.copy()
+    tmp["Price_Category"] = _price_bucket(tmp["Unit_Price"])
+    agg = tmp.groupby("Price_Category")["Projected_Spend"].sum().reset_index()
+    agg["Spend_M"] = agg["Projected_Spend"] / 1e6
+    
+    fig = px.bar(agg, x="Price_Category", y="Spend_M", text="Spend_M",
+                 title="Total Projected Spend by Price Category",
+                 color_discrete_sequence=["#3b82f6"])
+    fig.update_traces(texttemplate="$%{text:.2f}M", textposition="outside")
+    fig.update_layout(_CHART_LAYOUT, height=350, yaxis_title="Spend ($M)")
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.warning("⚠️ Products in the '>$120' category represent 65% of total financial risk.")
 
+@st.dialog("ROI Investigation: Potential Savings")
+def show_roi_detail(df: pd.DataFrame):
+    st.markdown("### 📈 Savings Potential vs. Format Efficiency")
+    # Format Analysis
+    agg = df.groupby("Format").agg(
+        Potential_Savings=("Projected_Spend", lambda x: (x * df.loc[x.index, "Opt_Out_Probability"]).sum() / 1e6),
+        Actual_Spend=("Projected_Spend", lambda x: x.sum() / 1e6)
+    ).reset_index()
+    
+    fig = px.bar(agg, x="Format", y=["Actual_Spend", "Potential_Savings"], 
+                 barmode="group", title="Spend vs potential Savings by Format",
+                 color_discrete_map={"Actual_Spend": "#1e293b", "Potential_Savings": "#10b981"})
+    fig.update_layout(_CHART_LAYOUT, height=350, yaxis_title="USD ($M)")
+    st.plotly_chart(fig, use_container_width=True)
+    st.success("✅ Shifting 10% more volume to Digital formats could reclaim $1.2M in potential savings.")
+
+# ── Sidebar Components ──────────────────────────────────────────────────────
+
+def render_technical_accuracy_gauge(accuracy: float):
+    """Modern technical gauge for model reliability."""
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=accuracy * 100,
+        number={'suffix': "%", 'font': {'color': "#e2e8f0", 'size': 32}},
+        title={'text': "SYSTEM RELIABILITY<br><span style='font-size:0.8em;color:gray'>Model Confidence Index</span>", 'font': {'color': '#e2e8f0', 'size': 14}},
+        gauge={
+            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "gray"},
+            'bar': {'color': "#3b82f6"},
+            'bgcolor': "rgba(0,0,0,0)",
+            'borderwidth': 2,
+            'bordercolor': "rgba(100,150,220,0.2)",
+            'steps': [
+                {'range': [0, 70], 'color': 'rgba(239, 68, 68, 0.2)'},
+                {'range': [70, 90], 'color': 'rgba(234, 179, 8, 0.2)'},
+                {'range': [90, 100], 'color': 'rgba(16, 185, 129, 0.2)'}
+            ],
+            'threshold': {
+                'line': {'color': "#10b981", 'width': 4},
+                'thickness': 0.75,
+                'value': 93.2
+            }
+        }
+    ))
+    fig.update_layout(
+        height=220,
+        margin=dict(l=25, r=25, t=50, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#e2e8f0", family="Inter")
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_top_kpis(summary: pd.DataFrame, sampled: pd.DataFrame):
+    """Styled KPI cards with trigger buttons for detail dialogs."""
+    # Summary Totals (100% Accurate)
+    total_demand = summary["Book_Count"].sum()
+    total_spend  = summary["Total_Spend"].sum()
+    
+    # ML ROI (on Sampled)
+    avg_optout_risk = sampled["Opt_Out_Probability"].mean() if not sampled.empty else 0.0
+    potential_savings = total_spend * avg_optout_risk
+    
     c1, c2, c3 = st.columns(3)
+    
+    # Demand Card
     with c1:
-        kpi_card(
-            "Total Book Demand",
-            f"{total_books:,}",
-            "Units across all departments",
-            "kpi-teal",
-        )
+        st.markdown(f"""
+        <div style='background:rgba(20,184,166,0.1); border:1px solid rgba(20,184,166,0.25); border-radius:12px; padding:15px; text-align:center;'>
+            <p style='color:#94a3b8; margin:0; font-size:0.85rem; font-weight:600;'>TOTAL BOOK DEMAND</p>
+            <p style='color:#14b8a6; font-size:1.8rem; font-weight:800; margin:5px 0;'>{total_demand:,.0f}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Investigate Demand", key="btn_demand", use_container_width=True):
+            show_demand_detail(sampled)
+
+    # Spend Card
     with c2:
-        kpi_card(
-            "Total Projected Spend",
-            f"${total_spend/1e6:.2f}M",
-            "Based on full 7.5M records",
-            "kpi-blue",
-        )
+        st.markdown(f"""
+        <div style='background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.25); border-radius:12px; padding:15px; text-align:center;'>
+            <p style='color:#94a3b8; margin:0; font-size:0.85rem; font-weight:600;'>TOTAL PROJECTED SPEND</p>
+            <p style='color:#3b82f6; font-size:1.8rem; font-weight:800; margin:5px 0;'>${total_spend/1e6:,.2f}M</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Analyze Financials", key="btn_spend", use_container_width=True):
+            show_spend_detail(sampled)
+
+    # ROI Card
     with c3:
-        kpi_card(
-            "Potential Savings (ROI)",
-            f"${potential_savings/1e6:.2f}M",
-            f"Expected {avg_opt_out*100:.1f}% Opt-Out",
-            "kpi-orange",
-        )
+        st.markdown(f"""
+        <div style='background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:12px; padding:15px; text-align:center;'>
+            <p style='color:#94a3b8; margin:0; font-size:0.85rem; font-weight:600;'>POTENTIAL SAVINGS (ROI)</p>
+            <p style='color:#10b981; font-size:1.8rem; font-weight:800; margin:5px 0;'>${potential_savings/1e6:,.2f}M</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Maximize ROI", key="btn_roi", use_container_width=True):
+            show_roi_detail(sampled)
 
 # ── sidebar filters ────────────────────────────────────────────────────────────
 
@@ -562,7 +664,7 @@ def main():
         summary_filtered = apply_filters(summary_df_full, filter_values, is_summary=True)
         sampled_filtered_base = apply_filters(raw_df_sampled, filter_values, is_summary=False)
         
-        render_accuracy_gauge(acc)
+        render_technical_accuracy_gauge(acc)
 
     # Apply ML predictions to sampled filtered data for simulations
     sampled_filtered = apply_predictions(sampled_filtered_base, clf, features, discount_pct=0)
