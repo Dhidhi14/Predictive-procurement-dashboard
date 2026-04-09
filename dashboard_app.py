@@ -590,22 +590,22 @@ def render_high_friction_titles(df: pd.DataFrame):
 
 # Row 6 ── Top-10 Department bar + Word cloud ─────────────────────────────────
 
-def render_dept_savings_opportunity(df: pd.DataFrame):
-    _section("Top 10 Departments by Potential Savings (ROI)")
+def render_publisher_savings_opportunity(df: pd.DataFrame):
+    _section("Top 10 Publishers/Authors by Potential Savings")
     if df.empty:
         return
-    # Calculate savings per department: Must include Demand Units in multiplication
-    agg = df.groupby("Dept_Code").apply(
+    # Calculate savings per publisher to negotiate bulk vendor discounts
+    agg = df.groupby("Publisher").apply(
         lambda x: (x.get("Predicted_Demand_Units", 1) * x.get("Unit_Price", 100) * x["Opt_Out_Probability"]).sum()
     ).nlargest(10).reset_index(name="Potential_Savings")
     
     fig = px.bar(
-        agg.sort_values("Potential_Savings"), x="Potential_Savings", y="Dept_Code",
+        agg.sort_values("Potential_Savings"), x="Potential_Savings", y="Publisher",
         orientation="h", color="Potential_Savings",
         color_continuous_scale="Viridis", text="Potential_Savings",
     )
     fig.update_traces(texttemplate="$%{text:,.0f}", textposition="outside", textfont_color="#e2e8f0")
-    fig.update_layout(height=380, xaxis_title="Potential Savings ($)", yaxis_title="Dept Code", coloraxis_showscale=False, **_CHART_LAYOUT)
+    fig.update_layout(height=380, xaxis_title="Potential Savings ($)", yaxis_title="Publisher/Author", coloraxis_showscale=False, **_CHART_LAYOUT)
     st.plotly_chart(fig, use_container_width=True)
 
 # Row 7 ── Scatter + Treemap ─────────────────────────────────────────────────
@@ -730,12 +730,12 @@ def main():
 
         st.markdown("<hr style='border:1px solid rgba(100,150,220,0.15);margin:10px 0;'>", unsafe_allow_html=True)
 
-        # ── Row 4: Scatter Plot (Student focus) | Dept Savings ROI ──────────
+        # ── Row 4: Scatter Plot (Student focus) | Publisher Savings ROI ──────────
         r4_l, r4_r = st.columns(2)
         with r4_l:
             render_price_vs_optout_scatter(sampled_filtered)
         with r4_r:
-            render_dept_savings_opportunity(sampled_filtered)
+            render_publisher_savings_opportunity(sampled_filtered)
 
         st.markdown("<hr style='border:1px solid rgba(100,150,220,0.15);margin:10px 0;'>", unsafe_allow_html=True)
 

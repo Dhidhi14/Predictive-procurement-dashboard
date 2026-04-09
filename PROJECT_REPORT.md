@@ -228,7 +228,7 @@ To ensure strictly accurate capital projections that can face procurement audits
 1. **Weighted ROI Calculation**: The Savings Potential KPI uses a direct weighted average (`sum(Gross_Spend * Opt_Out_Prob) / sum(Gross_Spend)`) across whatever sample is loaded. It bypasses simplistic median/mean reductions and correctly treats high-value items with more weight over overall savings totals.
 2. **Gross Spend Harminization**: All categorical and time-series charts map "Projected Spend" against actual `Gross_Spend` (Predicted_Demand * Unit_Price). Previously, some underlying queries mixed post-opt-out revenue with gross spend, creating visual contradictions against the top KPI dashboard totals.
 3. **Format Efficiency Fix**: When investigating financial exposure by Digital/Physical formats, the "Savings Potential" dialog strictly defines savings as `Gross * Opt_Out_Probability`, terminating compound multiplication errors (e.g., `Revenue * Opt_Out` which previously factored out the savings twice).
-4. **Volume Integration**: Departmental deep-dives automatically factor in `Predicted_Demand_Units` when assessing limits on savings ROI. High-risk, low-volume departments are therefore appropriately down-ranked compared to structurally massive intro-course departments where minor opt-out probability improvements lead to massive bulk savings.
+4. **Volume Integration**: Publisher-level deep-dives automatically factor in `Predicted_Demand_Units` when assessing limits on savings ROI. High-risk, low-volume vendors are therefore appropriately down-ranked compared to major publishers where minor opt-out probability improvements lead to massive bulk savings.
 
 ---
 

@@ -12,7 +12,7 @@ A data-driven Streamlit dashboard designed to help universities analyze bulk pur
 - Price sensitivity & opt‑out scatter plot (Arbitrage Index vs Opt‑Out Probability).
 - Feature importance view for the ML model (Random Forest).
 - Format preference charts (digital vs physical volume breakdown).
-- Risk segmentation by department factored directly against real predicted units.
+- Risk segmentation by vendor/publisher factored directly against real predicted units.
 - Absolute True Weighted Average ROI calculations to eliminate multi-tier price biases.
 >>>>>>> feat: stabilize hybrid data pipeline, refine UI widgets, and enforce deep mathematical consistency across Streamlit dashboard
 
