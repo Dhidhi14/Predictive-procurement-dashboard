@@ -168,3 +168,4 @@ Place the following files before running any scripts:
 - The `resource/` folder is auto-generated. Do not manually edit files inside it.
 - Always run `precompute_kpis.py` and `enrich_sentiment.py` before launching the dashboard for the first time, or whenever the source data changes.
 - If you encounter a `SyntaxWarning: invalid escape sequence` error, ensure all file paths in `.py` files use forward slashes or raw strings.
+
