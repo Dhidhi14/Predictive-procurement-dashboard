@@ -92,7 +92,7 @@ st.markdown(
         line-height: 1.35;
     }
     .kpi-card .kpi-value {
-        font-size: 1.85rem;
+        font-size: 1.55rem;
         font-weight: 700;
         letter-spacing: -0.02em;
         line-height: 1.1;
@@ -219,9 +219,13 @@ def show_spend_detail(df: pd.DataFrame):
 @st.dialog("ROI Investigation: Potential Savings")
 def show_roi_detail(df: pd.DataFrame):
     st.markdown("### 📈 Savings Potential vs. Format Efficiency")
-    # Format Analysis
-    agg = df.groupby("Format").agg(
-        Potential_Savings=("Projected_Spend", lambda x: (x * df.loc[x.index, "Opt_Out_Probability"]).sum() / 1e6),
+    # Format Analysis: Use accurate Gross Spend * OptOutRisk to avoid compounding errors
+    tmp = df.copy()
+    tmp["Gross_Spend"] = tmp.get("Predicted_Demand_Units", 1) * tmp.get("Unit_Price", 100)
+    tmp["Savings"] = tmp["Gross_Spend"] * tmp["Opt_Out_Probability"]
+    
+    agg = tmp.groupby("Format").agg(
+        Potential_Savings=("Savings", lambda x: x.sum() / 1e6),
         Actual_Spend=("Projected_Spend", lambda x: x.sum() / 1e6)
     ).reset_index()
     
@@ -274,9 +278,18 @@ def render_top_kpis(summary: pd.DataFrame, sampled: pd.DataFrame):
     total_demand = summary["Book_Count"].sum()
     total_spend  = summary["Total_Spend"].sum()
     
-    # ML ROI (on Sampled)
-    avg_optout_risk = sampled["Opt_Out_Probability"].mean() if not sampled.empty else 0.0
-    potential_savings = total_spend * avg_optout_risk
+    # ML ROI (on Sampled): Use weighted average instead of arbitrary mean for minimum error
+    if not sampled.empty:
+        sampled_gross = (sampled.get("Predicted_Demand_Units", 1) * sampled.get("Unit_Price", 100))
+        gross_sum = sampled_gross.sum()
+        if gross_sum > 0:
+            weighted_optout_risk = (sampled_gross * sampled["Opt_Out_Probability"]).sum() / gross_sum
+        else:
+            weighted_optout_risk = 0.0
+    else:
+        weighted_optout_risk = 0.0
+        
+    potential_savings = total_spend * weighted_optout_risk
     
     c1, c2, c3 = st.columns(3)
     
@@ -285,7 +298,7 @@ def render_top_kpis(summary: pd.DataFrame, sampled: pd.DataFrame):
         st.markdown(f"""
         <div style='background:rgba(20,184,166,0.1); border:1px solid rgba(20,184,166,0.25); border-radius:12px; padding:15px; text-align:center;'>
             <p style='color:#94a3b8; margin:0; font-size:0.85rem; font-weight:600;'>TOTAL BOOK DEMAND</p>
-            <p style='color:#14b8a6; font-size:1.8rem; font-weight:800; margin:5px 0;'>{total_demand:,.0f}</p>
+            <p style='color:#14b8a6; font-size:1.55rem; font-weight:800; margin:5px 0;'>{total_demand:,.0f}</p>
         </div>
         """, unsafe_allow_html=True)
         if st.button("Investigate Demand", key="btn_demand", use_container_width=True):
@@ -296,7 +309,7 @@ def render_top_kpis(summary: pd.DataFrame, sampled: pd.DataFrame):
         st.markdown(f"""
         <div style='background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.25); border-radius:12px; padding:15px; text-align:center;'>
             <p style='color:#94a3b8; margin:0; font-size:0.85rem; font-weight:600;'>TOTAL PROJECTED SPEND</p>
-            <p style='color:#3b82f6; font-size:1.8rem; font-weight:800; margin:5px 0;'>${total_spend/1e6:,.2f}M</p>
+            <p style='color:#3b82f6; font-size:1.55rem; font-weight:800; margin:5px 0;'>${total_spend/1e6:,.2f}M</p>
         </div>
         """, unsafe_allow_html=True)
         if st.button("Analyze Financials", key="btn_spend", use_container_width=True):
@@ -307,7 +320,7 @@ def render_top_kpis(summary: pd.DataFrame, sampled: pd.DataFrame):
         st.markdown(f"""
         <div style='background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:12px; padding:15px; text-align:center;'>
             <p style='color:#94a3b8; margin:0; font-size:0.85rem; font-weight:600;'>POTENTIAL SAVINGS (ROI)</p>
-            <p style='color:#10b981; font-size:1.8rem; font-weight:800; margin:5px 0;'>${potential_savings/1e6:,.2f}M</p>
+            <p style='color:#10b981; font-size:1.55rem; font-weight:800; margin:5px 0;'>${potential_savings/1e6:,.2f}M</p>
         </div>
         """, unsafe_allow_html=True)
         if st.button("Maximize ROI", key="btn_roi", use_container_width=True):
@@ -324,7 +337,9 @@ def render_filters(summary_df: pd.DataFrame) -> dict:
         )
         college = st.selectbox("College", ["All"] + sorted(summary_df["College"].unique().tolist()), key="f_college")
         year    = st.selectbox("Year",    ["All"] + sorted(summary_df["Year"].astype(str).unique().tolist()),    key="f_year")
-        dept    = st.selectbox("Department", ["All"] + sorted(summary_df["Department"].unique().tolist()), key="f_dept")
+        # Department dropdown commented out per user request
+        # dept    = st.selectbox("Department", ["All"] + sorted([str(x) for x in summary_df["Department"].dropna().unique() if str(x).strip() != ""]), key="f_dept")
+        dept    = "All"
         sem     = st.selectbox("Semester", ["All"] + sorted(summary_df["Semester"].unique().tolist()), key="f_sem")
         fmt     = st.selectbox("Format", ["All", "Digital", "Physical"], key="f_format")
 
@@ -350,10 +365,6 @@ def apply_filters(df: pd.DataFrame, filters: dict, is_summary: bool = True) -> p
     if filters["Semester"] != "All": mask &= df["Semester"] == filters["Semester"]
     if filters["Format"] != "All": mask &= df["Format"] == filters["Format"]
     
-    return df[mask]
-    if fmt     != "All": mask &= df["Format"] == fmt
-    if pcat    != "All": mask &= df_tmp["Price_Category"].astype(str) == pcat
-
     return df[mask].copy()
 
 # ── model accuracy gauge ───────────────────────────────────────────────────────
@@ -421,19 +432,18 @@ def _section(title: str):
 
 # Row 2 ── Donut + Distribution histogram ──────────────────────────────────────
 
-def render_adoption_type_optout_donut(df: pd.DataFrame):
-    _section("Adoption-type-wise Opt-Out Probability")
+def render_format_preference_donut(df: pd.DataFrame):
+    _section("Format Preference (Digital vs Physical)")
     if df.empty:
         st.info("No data.")
         return
-    agg = df.groupby("Student_Type")["Opt_Out_Probability"].mean().reset_index()
-    agg.columns = ["Student_Type", "Avg_Opt_Out"]
+    agg = df.groupby("Format")["Predicted_Demand_Units"].sum().reset_index()
     fig = go.Figure(go.Pie(
-        labels=agg["Student_Type"],
-        values=agg["Avg_Opt_Out"],
+        labels=agg["Format"],
+        values=agg["Predicted_Demand_Units"],
         hole=0.55,
         textinfo="label+percent",
-        marker=dict(colors=["#14b8a6", "#3b82f6", "#f97316"]),
+        marker=dict(colors=["#3b82f6", "#ec4899"]),
         textfont=dict(size=12, color="#e2e8f0"),
     ))
     fig.update_layout(
@@ -444,7 +454,7 @@ def render_adoption_type_optout_donut(df: pd.DataFrame):
         margin=dict(l=10, r=10, t=10, b=10),
         font=dict(color="#e2e8f0", family="Inter"),
     )
-    fig.add_annotation(text=f"Avg<br>{agg['Avg_Opt_Out'].mean()*100:.1f}%", x=0.5, y=0.5, showarrow=False, font=dict(size=14, color="#e2e8f0", family="Inter"))
+    fig.add_annotation(text="Format<br>Split", x=0.5, y=0.5, showarrow=False, font=dict(size=14, color="#e2e8f0", family="Inter"))
     st.plotly_chart(fig, use_container_width=True)
 
 def render_price_distribution(df: pd.DataFrame):
@@ -481,11 +491,12 @@ def render_price_cat_spend(df: pd.DataFrame):
         return
     tmp = df.copy()
     tmp["Price_Category"] = _price_bucket(tmp["Unit_Price"])
-    agg = tmp.groupby("Price_Category", observed=True)["Projected_Spend"].sum().reset_index()
+    tmp["Gross_Spend"] = tmp.get("Predicted_Demand_Units", 1) * tmp.get("Unit_Price", 100)
+    agg = tmp.groupby("Price_Category", observed=True)["Gross_Spend"].sum().reset_index()
     cat_order = ["<$50", "$50-$80", "$80-$120", ">$120"]
     agg["Price_Category"] = pd.Categorical(agg["Price_Category"], categories=cat_order, ordered=True)
     agg = agg.sort_values("Price_Category")
-    agg["Projected_Spend_M"] = agg["Projected_Spend"] / 1e6
+    agg["Projected_Spend_M"] = agg["Gross_Spend"] / 1e6
     fig = px.bar(
         agg, x="Price_Category", y="Projected_Spend_M",
         color="Price_Category",
@@ -510,8 +521,9 @@ def render_term_spend_ratio_by_price(df: pd.DataFrame):
         return
     tmp = df.copy()
     tmp["Price_Category"] = _price_bucket(tmp["Unit_Price"])
-    agg = tmp.groupby(["Term", "Price_Category"], observed=True)["Projected_Spend"].sum().reset_index()
-    agg["Projected_Spend_M"] = agg["Projected_Spend"] / 1e6
+    tmp["Gross_Spend"] = tmp.get("Predicted_Demand_Units", 1) * tmp.get("Unit_Price", 100)
+    agg = tmp.groupby(["Term", "Price_Category"], observed=True)["Gross_Spend"].sum().reset_index()
+    agg["Projected_Spend_M"] = agg["Gross_Spend"] / 1e6
 
     # Limit to top-10 terms by total spend for readability
     top_terms = agg.groupby("Term")["Projected_Spend_M"].sum().nlargest(10).index
@@ -535,8 +547,10 @@ def render_term_spend_by_adoption(df: pd.DataFrame):
     if df.empty:
         st.info("No data.")
         return
-    agg = df.groupby(["Term", "Student_Type"])["Projected_Spend"].sum().reset_index()
-    agg["Projected_Spend_M"] = agg["Projected_Spend"] / 1e6
+    tmp = df.copy()
+    tmp["Gross_Spend"] = tmp.get("Predicted_Demand_Units", 1) * tmp.get("Unit_Price", 100)
+    agg = tmp.groupby(["Term", "Student_Type"])["Gross_Spend"].sum().reset_index()
+    agg["Projected_Spend_M"] = agg["Gross_Spend"] / 1e6
 
     top_terms = agg.groupby("Term")["Projected_Spend_M"].sum().nlargest(10).index
     agg = agg[agg["Term"].isin(top_terms)]
@@ -564,8 +578,9 @@ def render_high_friction_titles(df: pd.DataFrame):
     if df.empty:
         return
     agg = df.groupby("Title")["Opt_Out_Probability"].mean().sort_values(ascending=False).head(10).reset_index()
+    agg["Short_Title"] = agg["Title"].astype(str).apply(lambda x: x[:25] + "..." if len(x) > 25 else x)
     fig = px.bar(
-        agg, x="Opt_Out_Probability", y="Title", orientation="h",
+        agg, x="Opt_Out_Probability", y="Short_Title", orientation="h",
         color="Opt_Out_Probability", color_continuous_scale="Reds",
         text="Opt_Out_Probability",
     )
@@ -579,9 +594,9 @@ def render_dept_savings_opportunity(df: pd.DataFrame):
     _section("Top 10 Departments by Potential Savings (ROI)")
     if df.empty:
         return
-    # Calculate savings per department in the sampled session
+    # Calculate savings per department: Must include Demand Units in multiplication
     agg = df.groupby("Dept_Code").apply(
-        lambda x: (x["Unit_Price"] * x["Opt_Out_Probability"]).sum()
+        lambda x: (x.get("Predicted_Demand_Units", 1) * x.get("Unit_Price", 100) * x["Opt_Out_Probability"]).sum()
     ).nlargest(10).reset_index(name="Potential_Savings")
     
     fig = px.bar(
@@ -625,7 +640,8 @@ def render_book_quantities(df: pd.DataFrame):
         return
     agg = df.groupby("Title")["Predicted_Demand_Units"].sum().reset_index()
     agg = agg.sort_values("Predicted_Demand_Units", ascending=False).head(20)
-    fig = px.bar(agg, x="Title", y="Predicted_Demand_Units", color="Predicted_Demand_Units", color_continuous_scale="Viridis")
+    agg["Short_Title"] = agg["Title"].astype(str).apply(lambda x: x[:22] + "..." if len(x) > 22 else x)
+    fig = px.bar(agg, x="Short_Title", y="Predicted_Demand_Units", color="Predicted_Demand_Units", color_continuous_scale="Viridis")
     fig.update_layout(height=420, xaxis_title="", yaxis_title="Predicted Units", coloraxis_showscale=False, **_CHART_LAYOUT)
     fig.update_xaxes(tickangle=45)
     st.plotly_chart(fig, use_container_width=True)
@@ -638,7 +654,19 @@ def render_word_cloud(df: pd.DataFrame):
     freq_dict = agg.to_dict()
     if not freq_dict:
         return
-    wc = WordCloud(width=1200, height=350, background_color=None, mode="RGBA", colormap="Blues").generate_from_frequencies(freq_dict)
+        
+    from collections import defaultdict
+    word_freq = defaultdict(int)
+    for title, count in freq_dict.items():
+        for word in str(title).split():
+            # Filter out small words or unhelpful words to improve visually
+            if len(word) > 4 and word.lower() not in ['edition', 'volume', 'unknown', 'title']:
+                word_freq[word] += count
+                
+    if not word_freq:
+        return
+        
+    wc = WordCloud(width=1200, height=350, background_color=None, mode="RGBA", colormap="Blues").generate_from_frequencies(word_freq)
     fig, ax = plt.subplots(figsize=(12, 3.5))
     ax.imshow(wc, interpolation="bilinear")
     ax.axis("off")
@@ -675,12 +703,12 @@ def main():
 
         st.markdown("<hr style='border:1px solid rgba(100,150,220,0.15);margin:10px 0;'>", unsafe_allow_html=True)
 
-        # ── Row 1: Price Category Spend | Adoption Donut (Swapped) ─────────────
+        # ── Row 1: Price Category Spend | Format Preference (Swapped) ─────────────
         r1_l, r1_r = st.columns(2)
         with r1_l:
             render_price_cat_spend(sampled_filtered)
         with r1_r:
-            render_adoption_type_optout_donut(sampled_filtered)
+            render_format_preference_donut(sampled_filtered)
 
         st.markdown("<hr style='border:1px solid rgba(100,150,220,0.15);margin:10px 0;'>", unsafe_allow_html=True)
 

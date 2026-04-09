@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pandas as pd
 import numpy as np
+import gc
 from sklearn.ensemble import RandomForestClassifier
 
 def train_model(df: pd.DataFrame):
@@ -67,9 +68,11 @@ def train_model(df: pd.DataFrame):
     if len(cat_cols) > 0:
         # Convert to object first to avoid Categorical type restrictions during fillna
         X_cat = X_raw[cat_cols].astype(object).fillna("Unknown").astype(str)
-        # Use simple get_dummies for categorical encoding
-        X_cat_encoded = pd.get_dummies(X_cat, drop_first=True, dtype=int)
+        # Use simple get_dummies for categorical encoding with memory-efficient dtype
+        X_cat_encoded = pd.get_dummies(X_cat, drop_first=True, dtype=np.int8)
         X_clean = pd.concat([X_clean, X_cat_encoded], axis=1)
+        del X_cat, X_cat_encoded
+        gc.collect()
 
     # Note: Ensure we have actual features left
     features = list(X_clean.columns)
@@ -83,7 +86,7 @@ def train_model(df: pd.DataFrame):
         return None, default_fi, features, 0.0
     
     # 4. Automated feature evaluation and model training
-    clf = RandomForestClassifier(n_estimators=50, max_depth=6, random_state=42, n_jobs=1)
+    clf = RandomForestClassifier(n_estimators=30, max_depth=6, random_state=42, n_jobs=1)
     clf.fit(X_clean, y)
     
     acc = clf.score(X_clean, y)
@@ -134,8 +137,10 @@ def apply_predictions(df: pd.DataFrame, clf: object, features: list, discount_pc
     if len(cat_cols) > 0:
         # Convert to object first to avoid Categorical type restrictions during fillna
         X_cat = X_raw[cat_cols].astype(object).fillna("Unknown").astype(str)
-        X_cat_encoded = pd.get_dummies(X_cat, drop_first=True, dtype=int)
+        X_cat_encoded = pd.get_dummies(X_cat, drop_first=True, dtype=np.int8)
         X_clean = pd.concat([X_clean, X_cat_encoded], axis=1)
+        del X_cat, X_cat_encoded
+        gc.collect()
 
     # Align columns to what the model expects
     X_all = pd.DataFrame(0, index=X_clean.index, columns=features)

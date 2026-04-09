@@ -44,6 +44,10 @@ _DTYPES = {
     "term_year":                 "category",
     "author":                    "category",
     "student_full_part_time_status": "category",
+    "College":                   "category",
+    "Year":                      "category",
+    "Semester":                  "category",
+    "Department":                "category",
     "ebook_ind":                 "float32",
     "retail_new":                "float32",
     "retail_new_rent":           "float32",
@@ -62,29 +66,49 @@ def load_summary_kpis(summary_path: str = "resource/summary_kpis.csv") -> pd.Dat
     return pd.DataFrame()
 
 def load_feature_table(
-    data_path: str = "new/master_data/master_data.csv",
-    sample_limit: int = 50_000,
+    data_path: str = "new/master_data/master_data_sampled.csv",
+    sample_limit: int = 20_000,
 ) -> pd.DataFrame:
     """
     Load a sampled subset of the master data for ML modeling and simulation.
-    This avoids OOM while maintaining statistical distribution.
+    This reads from a pre-sampled 60k row subset generated securely via bash `shuf`.
     """
     if not os.path.exists(data_path):
-        raise FileNotFoundError(f"Master data not found at {data_path}")
+        raise FileNotFoundError(f"Optimized sample not found at {data_path}. Please run the sampler first.")
 
-    print(f"  → Reading master data for ML sample (limit {sample_limit:,}) …", flush=True)
+    print(f"  → Loading optimized ML sample ({data_path}) …", flush=True)
 
-    # We read only a subset to keep the dashboard responsive and memory-safe
+    # Use explicit list for usecols to be faster and safer
+    target_cols = [c for c in _NEEDED_COLS if c != "College" and c != "Year" and c != "Semester" and c != "Department"]
+    # Add metadata cols back if they are not in _NEEDED_COLS
+    for meta in ["College", "Year", "Semester", "Department"]:
+        if meta not in target_cols:
+            target_cols.append(meta)
+
+    # Read the pre-sampled file
     df = pd.read_csv(
         data_path,
-        usecols=lambda c: c in _NEEDED_COLS or c in ["College", "Year", "Semester", "Department", "will_buy"],
+        usecols=lambda c: c in target_cols or c == "will_buy",
         dtype=_DTYPES,
-        nrows=sample_limit * 2, # Read a bit more to ensure we can sample properly after drops
+        engine='c' # Use fast C engine
     )
     
-    # Sample down to the strict limit
+    # Sample down to the strict memory limit
     if len(df) > sample_limit:
         df = df.sample(n=sample_limit, random_state=42)
+    
+    gc.collect() # Immediate cleanup
+    
+    # Remove year '21' or 2021 data
+    if "Year" in df.columns:
+        df["Year"] = df["Year"].astype(str)
+        df = df[~df["Year"].isin(["21", "2021", "21.0"])]
+    if "term_year" in df.columns:
+        df["term_year"] = df["term_year"].astype(str)
+        df = df[~df["term_year"].isin(["21", "2021", "21.0"])]
+        
+    df = df.copy() # Ensure memory contiguous
+
 
     # --- Data Cleaning & Feature Generation (Matching precompute logic) ---
     df["Term"]         = (df["term_code"].astype(str) + " " + df["term_year"].astype(str)).astype("category")
