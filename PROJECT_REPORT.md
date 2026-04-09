@@ -229,6 +229,7 @@ To ensure strictly accurate capital projections that can face procurement audits
 2. **Gross Spend Harminization**: All categorical and time-series charts map "Projected Spend" against actual `Gross_Spend` (Predicted_Demand * Unit_Price). Previously, some underlying queries mixed post-opt-out revenue with gross spend, creating visual contradictions against the top KPI dashboard totals.
 3. **Format Efficiency Fix**: When investigating financial exposure by Digital/Physical formats, the "Savings Potential" dialog strictly defines savings as `Gross * Opt_Out_Probability`, terminating compound multiplication errors (e.g., `Revenue * Opt_Out` which previously factored out the savings twice).
 4. **Volume Integration**: Publisher-level deep-dives automatically factor in `Predicted_Demand_Units` when assessing limits on savings ROI. High-risk, low-volume vendors are therefore appropriately down-ranked compared to major publishers where minor opt-out probability improvements lead to massive bulk savings.
+5. **Global Representation Scaling**: To address visually misaligned volume counts between the interactive sample and the offline summary, an automated *Scale Factor* maps the sampled units to match 100% of the `6.7M` global KPI totals natively before UI rendering. Therefore, the "Total Book Demand" KPI will now vertically align flawlessly with the counts aggregated inside the Price Category and Unit Demand charts.
 
 ---
 
