@@ -4,9 +4,8 @@ A data-driven Streamlit dashboard designed to help universities analyze bulk pur
 
 ---
 
-<<<<<<< HEAD
 ## 🚀 Features
-=======
+
 - Executive KPIs (predicted demand, projected spend, digital vs physical mix, high‑risk opt‑out rate).
 - Interactive filters by term, department, publisher, student type, safely handled explicitly via real-time data cleansing.
 - Price sensitivity & opt‑out scatter plot (Arbitrage Index vs Opt‑Out Probability).
@@ -14,7 +13,6 @@ A data-driven Streamlit dashboard designed to help universities analyze bulk pur
 - Format preference charts (digital vs physical volume breakdown).
 - Risk segmentation by vendor/publisher factored directly against real predicted units.
 - Absolute True Weighted Average ROI calculations to eliminate multi-tier price biases.
->>>>>>> feat: stabilize hybrid data pipeline, refine UI widgets, and enforce deep mathematical consistency across Streamlit dashboard
 
 - **Predictive Procurement Analytics** — Forecasts future bulk order demand using historical purchase data
 - **KPI Dashboard** — Pre-computed key performance indicators displayed across interactive charts and metrics
