@@ -6,13 +6,14 @@
 ### Table of Contents
 1. [Introduction and Project Scope](#1-introduction-and-project-scope)
 2. [High-Level System Architecture](#2-high-level-system-architecture)
-3. [Raw Data Dictionary (`new/Augmented/`)](#3-raw-data-dictionary)
+3. [Raw Data Dictionary (`new/Augmented/` & `new/master_data/`)](#3-raw-data-dictionary)
 4. [ETL Pipeline Implementation (`etl_pipeline.py`)](#4-etl-pipeline-implementation)
 5. [Feature Engineering & Behavioral Economics](#5-feature-engineering--behavioral-economics)
 6. [Machine Learning Engine (`feature_engine.py`)](#6-machine-learning-engine)
 7. [Decision Support Dashboard (`dashboard_app.py`)](#7-decision-support-dashboard)
 8. [Target Database Schema (`schema.sql`)](#8-target-database-schema)
 9. [Deployment and Execution](#9-deployment-and-execution)
+10. [Code File Manifest & Detailed Explanations](#10-code-file-manifest--detailed-explanations)
 
 ---
 
@@ -37,7 +38,11 @@ The application is structured into a modular pipeline, separating data ingestion
 
 ## 3. Raw Data Dictionary
 
-The data ingested from `new/Augmented/*_balanced_dataset.csv` contains granular transactional and demographic data. 
+The data ingested from the source directories contains granular transactional, demographic, and qualitative data.
+
+### 3.1 External Data Sub-System: Sentiment Aggregation
+The system utilizes a supplemental dataset, `Training_Data_Clean.csv` (located in `new/master_data/`), which contains hundreds of thousands of student feedback data points and survey responses on various textbooks. 
+* **Usage (`enrich_sentiment.py`)**: This script acts as a specialized qualitative pre-processor. It reads `Training_Data_Clean.csv`, standardizes the book titles, and aggregates (averages) various qualitative metrics like "conceptual clarity" and "value for money." It outputs a smaller `book_sentiment.csv` file that the main `etl_pipeline.py` later left-joins against the bulk transaction data. This enables the ML model to factor in "student satisfaction" as a predictor for purchase behavior. 
 
 ### Identity and Academic Context
 * `sis_user_id`: Unique surrogate key representing a specific student.
@@ -244,3 +249,30 @@ To run the server natively in development:
 ```bash
 source .venv/bin/activate && streamlit run dashboard_app.py
 ```
+
+---
+
+## 10. Code File Manifest & Detailed Explanations
+The project is built using a micro-script architecture, mapping different logical phases of the data pipeline to explicit Python scripts. Here is the detailed explanation for each active Python script in the system:
+
+1. **`dashboard_app.py`** (The UI & Controller Layer)
+   * **Functionality**: The core Streamlit web application. It houses the `get_raw_data()` and `get_summary_data()` cached data loaders to pull in the CSV outputs. It evaluates side-bar filters dynamically, calculates on-the-fly execution KPIs, and is responsible for rendering the complex Plotly glassmorphism charts and gauge metrics. It also interacts with `feature_engine.py` to train models strictly on the filtered subsets.
+
+2. **`etl_pipeline.py`** (The Data Wrangler)
+   * **Functionality**: Responsible for joining the raw master transaction files (`master_data_sampled.csv`) with the aggregated sentiment data. It evaluates memory-efficient transformations using fast C-engines, drops outdated formats (e.g., historical '21' semester data), creates vital ML economic features like `Arbitrage_Index` and `Wallet_Pressure_Score`, and enforces strict memory types (like `category` and `float32`). It feeds both the ML model and the Dashboard.
+
+3. **`feature_engine.py`** (The Internal Machine Learning API)
+   * **Functionality**: Defines the core Scikit-Learn logic. It contains `train_model(df)` which dynamically drops redundant identifiers, balances features, and trains a single fast `RandomForestClassifier`. Additionally, it exposes `apply_predictions(df, clf)` which is capable of applying simulated What-If modifications (like a 10% discount on prices) and re-predicting purchase behavior. 
+
+4. **`precompute_kpis.py`** (The Global Offline Aggregator)
+   * **Functionality**: A backend processing engine designed to bypass Streamlit's real-time memory constraints. This script directly utilizes `chunksize=750000` to iterate through the massive gigabytes-large `master_data.csv`. It groups transactions by College, Term, and Department to calculate perfectly accurate true volume sums for `Total_Spend` and `Book_Count`. It saves these to `resource/summary_kpis.csv`.
+
+5. **`enrich_sentiment.py`** (Qualitative ETL Integrations)
+   * **Functionality**: This standalone script explicitly parses the `Training_Data_Clean.csv`. It translates complicated survey data ("How would you rate the value for money of this textbook?") into unified `Sentiment_Value_For_Money` and `Sentiment_Avg_Rating` numerical averages aggregated specifically to the distinct `Book_Title`.
+
+6. **`count_student_purchase.py`** (Diagnostic Analytics API)
+   * **Functionality**: A helper diagnostic module that utilizes `etl_pipeline.py` to calculate simple base volume statistics. It tracks total Full-Time vs Part-Time splits and precise True vs False boolean maps of the actual `will_buy` purchase flag inside a dictionary. 
+
+7. **`model_evaluation.py`** (The Performance Verification Suite)
+   * **Functionality**: An offline script allowing the primary engineers to run rigorous quantitative checks on the Random Forest model architecture prior to Streamlit deployment. It runs classic statistical analysis via `train_test_split`, spitting out highly granular validation logs on `accuracy_score`, `f1_score`, producing an ASCII `confusion_matrix`, and logging a full precision/recall `classification_report` out to the terminal log.
+
