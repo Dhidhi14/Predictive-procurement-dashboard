@@ -464,7 +464,8 @@ def render_price_distribution(df: pd.DataFrame):
         return
     tmp = df.copy()
     tmp["Price_Category"] = _price_bucket(tmp["Unit_Price"])
-    agg = tmp.groupby("Price_Category", observed=True).size().reset_index(name="Count")
+    tmp["Predicted_Demand_Units"] = tmp.get("Predicted_Demand_Units", 1)
+    agg = tmp.groupby("Price_Category", observed=True)["Predicted_Demand_Units"].sum().reset_index(name="Count")
     cat_order = ["<$50", "$50-$80", "$80-$120", ">$120"]
     agg["Price_Category"] = pd.Categorical(agg["Price_Category"], categories=cat_order, ordered=True)
     agg = agg.sort_values("Price_Category")
@@ -696,6 +697,23 @@ def main():
 
     # Apply ML predictions to sampled filtered data for simulations
     sampled_filtered = apply_predictions(sampled_filtered_base, clf, features, discount_pct=0)
+    
+    # Scale the sample to match the total population volume for accurate chart representation
+    total_demand = summary_filtered["Book_Count"].sum()
+    sample_demand_sum = sampled_filtered["Predicted_Demand_Units"].sum() if "Predicted_Demand_Units" in sampled_filtered.columns else len(sampled_filtered)
+    
+    scale_factor = total_demand / sample_demand_sum if sample_demand_sum > 0 else 1.0
+    
+    # Scale up demand explicitly to align visual charts with global KPIs
+    if "Predicted_Demand_Units" in sampled_filtered.columns:
+        sampled_filtered["Predicted_Demand_Units"] = sampled_filtered["Predicted_Demand_Units"] * scale_factor
+    else:
+        sampled_filtered["Predicted_Demand_Units"] = scale_factor
+        
+    # Demand units have scaled, so we must re-calculate the dependent Projected Spend
+    price = sampled_filtered.get("Unit_Price", 100)
+    prob = sampled_filtered.get("Predicted_Purchase_Prob", 1.0)
+    sampled_filtered["Projected_Spend"] = sampled_filtered["Predicted_Demand_Units"] * price * prob
 
     with main_col:
         # ── Row 0: KPI Cards (Accuracy from Summary, Confidence from ML) ──────
